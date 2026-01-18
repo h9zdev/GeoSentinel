@@ -5,7 +5,7 @@
 It aggregates ship and flight routes, live coordinates, and geodata into a unified system, providing clear geographic and geopolitical awareness for analysis, visualization, and decision-making.
 . 🚀
 
-🚀 Visit: [hayvnz.web.app](https://hayvnz.web.app)
+🚀 Visit: [haybnz.web.app](https://haybnz.web.app/blog)
 
 ## 🌟 Features
 
