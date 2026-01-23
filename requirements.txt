@@ -5,4 +5,3 @@ feedparser
 numpy
 opencv-python-headless
 Pillow
-ultralytics
