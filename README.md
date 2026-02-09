@@ -65,7 +65,6 @@ https://docs.google.com/forms/d/e/1FAIpQLSe3qBh6r1orih2MkLf5DjdolX0jv5Abct02363l
 ### 🔗 Download Link
 👉 [Download geodata folder](https://drive.proton.me/urls/RJB7K8HXTM#r7PnpGiVkg6P)
 
-
 ## 📝 Configuration
 
 ### API Keys Required
@@ -77,6 +76,7 @@ https://docs.google.com/forms/d/e/1FAIpQLSe3qBh6r1orih2MkLf5DjdolX0jv5Abct02363l
 - **Other APIs**: Add relevant API keys in `app.py`
 
 ---
+
 
 # 🛰️ GeoSentinel Installation Guide
 
@@ -217,133 +217,6 @@ ollama serve
 
 
 
-## 📝 Configuration
-
-### API Keys Required
-- **TomTom Maps API**: Add your key in `templates/earth.html` (line ~1850)
-  ```javascript
-  const tomtomApiKey = 'YOUR_TOMTOM_API_KEY';
-  ```
-
-- **Other APIs**: Add relevant API keys in `app.py`
-
----
-
-## 🚀 Advanced Usage
-
-### With TOR + OLLAMA
-```python
-import requests
-from stem.control import Controller
-import json
-
-# Configure TOR
-proxies = {
-    'http': 'socks5://127.0.0.1:9050',
-    'https': 'socks5://127.0.0.1:9050'
-}
-
-# Query OLLAMA through TOR (for privacy-focused analysis)
-response = requests.post(
-    'http://localhost:11434/api/generate',
-    json={"model": "llama2", "prompt": "Analyze geopolitical data"},
-    proxies=proxies,
-    timeout=30
-)
-```
-
----
-
-- News Dashboard  
-  https://127.0.0.1:8000/news
-
----
-
-## ✅ Notes
-- SSL warnings are normal for localhost with HTTPS.
-- Use http://127.0.0.1:8000 if HTTPS is not configured.
-## ⚙️ API Endpoints
-
-### 🌎 Earth
-
--   **GET /earth**
-    -   Renders the main earth page.
-
-### 🗺️ GeoJSON
-
--   **GET /api/geojson/<filename>**
-    -   Retrieves a summary of a GeoJSON file.
-    -   Example: `/api/geojson/example.geojson`
-
-### 🛰️ Surveillance Grid
-
--   **GET /api/geo/index**
-    -   Retrieves the surveillance grid index.
--   **GET /api/geo/tile/<z>/<x>/<y>**
-    -   Retrieves a specific surveillance grid tile.
-    -   Example: `/api/geo/tile/1/2/3`
-
-### ✈️ Flights
-
--   **GET /api/geo/flights**
-    -   Fetches live flight data.
--   **GET /api/geo/flight/meta/<callsign>**
-    -   Retrieves metadata for a specific flight.
-    -   Example: `/api/geo/flight/meta/UAL123`
-
-### 🚢 Vessels
-
--   **GET /api/geo/vessels**
-    -   Fetches live vessel data.
--   **GET /api/geo/vessel/path/<mmsi>**
-    -   Retrieves the historical path of a vessel.
-    -   Example: `/api/geo/vessel/path/123456789`
-
-### 📸 Image Analysis
-
--   **POST /api/geo/segment**
-    -   Performs aerial segmentation on a satellite tile.
--   **POST /api/geo/analyze-upload** or **/upload**
-    -   Analyzes an uploaded image for objects and GPS metadata.
-
-### 📰 News
-
--   **GET /api/geo/news**
-    -   Fetches geopolitical news for a specific location.
--   **POST /api/news/analyze**
-    -   Analyzes the sentiment of a news article.
--   **GET /api/news/advanced**
-    -   Performs an advanced search for news articles.
-
-### 💹 Market
-
--   **GET /api/market/data**
-    -   Fetches market data for commodities and cryptocurrencies.
-
-### 🌐 Translate
-
--   **GET /api/translate**
-    -   Translates text to English.
-
-### 🔍 Web Scraper
-
--   **POST /api/tools/web_scan**
-    -   Advanced web scanning with multi-engine support and Google Dorking.
-    -   Parameters: `query`, `type` (text/images/all), `sources` (list of sites), `aggressive` (boolean).
-
-### 🤖 GeoSential AI
-
--   **POST /api/geosentialai/chat**
-    -   Chat with the AI assistant for geospatial analysis and real-time data.
-    -   Parameters: `message`, `web_search` (boolean), `human_mode` (boolean), `engine` (cloud/local), `context` (map state).
-
-## 🚀 How to Use
-
-
-```bash
-curl http://localhost:8000/api/geo/flights
-```
-
 ## 🙏 API TO USE
 
 -   [OpenStreetMap](https://www.openstreetmap.org/)
@@ -354,20 +227,12 @@ curl http://localhost:8000/api/geo/flights
 -   [tomtom](https://developer.tomtom.com)
 
 ## 🗺️ Images of GeoSentinel UI
-
-
-
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-08%2001-01-15.png)
 ![GeoSentinel Screenshot](https://github.com/h9zdev/GeoSentinel/blob/main/images/Screenshot%20From%202026-01-18%2019-29-41.png)
-
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-08%2002-44-21.png)
-
-
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-16%2016-47-19.png)
-
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-16%2016-46-43.png)
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-16%2016-46-25.png)
-
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-09%2014-04-26.png)
 
 
