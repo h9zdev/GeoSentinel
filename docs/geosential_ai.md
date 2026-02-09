@@ -6,6 +6,23 @@ Welcome to the **GeoSential AI** manual! GeoSential AI is your high-tech Geospat
 
 GeoSential AI integrates real-time web data, map functionality, and semantic memory to assist in monitoring global activities. It can track flights, vessels, scan sectors for signals, and provide up-to-the-minute news and market data.
 
+## ⚙️ Installation
+
+To use GeoSential AI, ensure the following dependencies and services are set up:
+
+1. **Python Dependencies**:
+   ```bash
+   pip install requests beautifulsoup4 duckduckgo_search chromadb sentence-transformers gTTS
+   ```
+2. **AI Engines**:
+   - **Cloud**: Obtain a Hugging Face token and set `HF_TOKEN` in `app.py`.
+   - **Local**: Install [Ollama](https://ollama.com/), pull the `phi` and `all-minilm` models:
+     ```bash
+     ollama pull phi
+     ollama pull all-minilm
+     ```
+3. **Tor (Optional)**: Required for dark web search integration.
+
 ## 🛠️ How to Use
 
 ### 🖥️ Interface
