@@ -54,19 +54,28 @@ https://docs.google.com/forms/d/e/1FAIpQLSe3qBh6r1orih2MkLf5DjdolX0jv5Abct02363l
 -   Responsive design for all devices
 -   GPS metadata extraction from images
 -   Real-time data visualization
--   
+  
 ###    📦 Download and Move `geodata` Folder to Root Directory
 
 ### 🔗 Download Link
 👉 [Download geodata folder](https://drive.proton.me/urls/RJB7K8HXTM#r7PnpGiVkg6P)
 
-### 🔗 Download Link
--ADD API KEY IN app.py
--ADD API KEY IN earth.html {on line1850 const tomtomApiKey = 'ADD_API+KEY';}
+
+## 📝 Configuration
+
+### API Keys Required
+- **TomTom Maps API**: Add your key in `templates/earth.html` (line ~1850)
+  ```javascript
+  const tomtomApiKey = 'YOUR_TOMTOM_API_KEY';
+  ```
+
+- **Other APIs**: Add relevant API keys in `app.py`
+
+---
 
 # 🛰️ GeoSentinel Installation Guide
 
-## 📥 Clone or Fork the Repository
+
 
 ### Option 1: Clone directly
 ```bash
@@ -160,25 +169,7 @@ tor
 curl --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip
 ```
 
-### Configure TOR in GeoSentinel
-Add to your Python code for TOR support:
-```python
-import requests
-from requests.adapters import HTTPAdapter
-from stem import Signal
-from stem.control import Controller
 
-# SOCKS5 proxy configuration
-proxies = {
-    'http': 'socks5://127.0.0.1:9050',
-    'https': 'socks5://127.0.0.1:9050'
-}
-
-# Make request through TOR
-response = requests.get('https://api.example.com', proxies=proxies)
-```
-
----
 
 ## 🤖 OLLAMA Installation & Setup
 
@@ -218,56 +209,8 @@ ollama pull orca-mini    # Orca Mini model
 ollama serve
 ```
 
-#### Step 5: Test OLLAMA
-```bash
-# In another terminal, test the API
-curl http://localhost:11434/api/generate -d '{
-  "model": "llama2",
-  "prompt": "Why is the sky blue?"
-}'
-```
 
-### Python Integration with GeoSentinel
-```python
-import requests
-import json
 
-def query_ollama(prompt, model="llama2"):
-    """Query OLLAMA local LLM"""
-    url = "http://localhost:11434/api/generate"
-    
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False
-    }
-    
-    response = requests.post(url, json=payload)
-    if response.status_code == 200:
-        return response.json()['response']
-    return None
-
-# Usage example
-response = query_ollama("Analyze the geopolitical implications of...")
-print(response)
-```
-
-### Common OLLAMA Commands
-```bash
-# List installed models
-ollama list
-
-# Remove a model
-ollama rm llama2
-
-# Run model interactively
-ollama run llama2
-
-# Set custom parameters
-ollama run llama2 --temperature 0.5 --top_k 10
-```
-
----
 
 ## 📝 Configuration
 
