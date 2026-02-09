@@ -1,4 +1,5 @@
 import os
+import re
 import io
 import json
 import csv
@@ -18,6 +19,8 @@ from functools import wraps
 from flask import Flask, render_template, jsonify, request, redirect, url_for, make_response, send_from_directory, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image, ExifTags
+import tempfile
+from gtts import gTTS
 
 
 # Import local configs
@@ -36,10 +39,22 @@ PARENT_DIR = os.path.dirname(BASE_DIR)
 GEODATA_DIR = os.path.join(PARENT_DIR, 'geodata')
 
 
-# API Keys (Copied from HayOS.py)
-NEWS_API_KEY = "API_KEY"
-OPENROUTER_API_KEY = "API_KEY"
 
+
+# Social / News API Keys (Placeholders)
+TWITTER_API_KEY = "YOUR_API_KEYS"
+TWITTER_API_SECRET = "YOUR_API_KEYS"
+TWITTER_ACCESS_TOKEN = "YOUR_API_KEYS"
+TWITTER_ACCESS_TOKEN_SECRET = "YOUR_API_KEYS"
+TWITTER_BEARER_TOKEN = "YOUR_API_KEYS"
+api_key = "YOUR_API_KEYS"
+# --- CELL TOWER UPLINK ---
+OPENCELLID_API_KEY = "YOUR_API_KEY" 
+HF_TOKEN = "YOUR_API_KEY" 
+
+
+NEWS_API_KEY = "YOUR_API_KEYS"
+OPENROUTER_API_KEY = "YOUR_API_KEYS" # USER: Replace with your actual key
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret-key'
@@ -72,7 +87,11 @@ def earth():
     return render_template("earth.html", geojson_files=geojson_files)
 
 
+
+
+
 @app.route('/api/geojson/<filename>')
+
 def get_geojson_data(filename):
     """Return a summary of the GeoJSON file (properties and first few coords to keep it snappy)."""
     # Security check: prevent directory traversal
@@ -107,7 +126,6 @@ def get_geojson_data(filename):
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/geo/index')
-
 def get_geo_index():
     """Return the surveillance grid index."""
     filepath = os.path.join(app.root_path, 'geodata', 'geo', 'index.json')
@@ -122,7 +140,6 @@ def get_geo_index():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/geo/tile/<z>/<x>/<y>')
-
 def get_geo_tile(z, x, y):
     """Return a specific surveillance grid tile."""
     # Security check: ensure z, x, y are integers to prevent path traversal
@@ -145,203 +162,220 @@ def get_geo_tile(z, x, y):
         return jsonify({"error": str(e)}), 500
 
 
-# Live flight data configuration
-ADSB_REGIONS = [
-    # North America
-    ("https://opendata.adsb.fi/api/v3/lat/40/lon/-100/dist/250", "NorthAmerica_Central"),
-    ("https://opendata.adsb.fi/api/v3/lat/45/lon/-75/dist/250", "USA_East"),
-    ("https://opendata.adsb.fi/api/v3/lat/35/lon/-120/dist/250", "USA_West"),
-    ("https://opendata.adsb.fi/api/v3/lat/30/lon/-90/dist/250", "USA_South"),
-    ("https://opendata.adsb.fi/api/v3/lat/50/lon/-110/dist/250", "Canada_West"),
-    # Europe
-    ("https://opendata.adsb.fi/api/v3/lat/50/lon/10/dist/250", "Europe_Central"),
-    ("https://opendata.adsb.fi/api/v3/lat/51/lon/0/dist/250", "Europe_UK"),
-    ("https://opendata.adsb.fi/api/v3/lat/40/lon/-3/dist/250", "Europe_Spain"),
-    ("https://opendata.adsb.fi/api/v3/lat/45/lon/5/dist/250", "Europe_France"),
-    ("https://opendata.adsb.fi/api/v3/lat/42/lon/12/dist/250", "Europe_Italy"),
-    ("https://opendata.adsb.fi/api/v3/lat/52/lon/21/dist/250", "Europe_Poland"),
-    # Asia
-    ("https://opendata.adsb.fi/api/v3/lat/28/lon/77/dist/250", "SouthAsia_India"),
-    ("https://opendata.adsb.fi/api/v3/lat/19/lon/72/dist/250", "India_Mumbai"),
-    ("https://opendata.adsb.fi/api/v3/lat/35/lon/139/dist/250", "Japan_Tokyo"),
-    ("https://opendata.adsb.fi/api/v3/lat/31/lon/121/dist/250", "China_Shanghai"),
-    ("https://opendata.adsb.fi/api/v3/lat/22/lon/114/dist/250", "China_HongKong"),
-    ("https://opendata.adsb.fi/api/v3/lat/13/lon/100/dist/250", "SEAsia_Thailand"),
-    ("https://opendata.adsb.fi/api/v3/lat/1/lon/103/dist/250", "SEAsia_Singapore"),
-    # Russia
-    ("https://opendata.adsb.fi/api/v3/lat/55/lon/37/dist/250", "Russia_Moscow"),
-    ("https://opendata.adsb.fi/api/v3/lat/55/lon/82/dist/250", "Russia_Siberia"),
-    ("https://opendata.adsb.fi/api/v3/lat/43/lon/131/dist/250", "Russia_FarEast"),
-    # Oceania
-    ("https://opendata.adsb.fi/api/v3/lat/-33/lon/151/dist/250", "Australia_East"),
-    ("https://opendata.adsb.fi/api/v3/lat/-37/lon/144/dist/250", "Australia_South"),
-    # South America
-    ("https://opendata.adsb.fi/api/v3/lat/-23/lon/-46/dist/250", "SouthAmerica_Brazil"),
-    ("https://opendata.adsb.fi/api/v3/lat/-34/lon/-58/dist/250", "SouthAmerica_Argentina"),
-    ("https://opendata.adsb.fi/api/v3/lat/4/lon/-74/dist/250", "SouthAmerica_Colombia"),
-    # Africa
-    ("https://opendata.adsb.fi/api/v3/lat/30/lon/31/dist/250", "Africa_Egypt"),
-    ("https://opendata.adsb.fi/api/v3/lat/-26/lon/28/dist/250", "Africa_South"),
-    ("https://opendata.adsb.fi/api/v3/lat/-1/lon/36/dist/250", "Africa_East"),
-    ("https://opendata.adsb.fi/api/v3/lat/6/lon/3/dist/250", "Africa_West"),
-    # Middle East
-    ("https://opendata.adsb.fi/api/v3/lat/25/lon/55/dist/250", "MiddleEast_Dubai"),
-    ("https://opendata.adsb.fi/api/v3/lat/32/lon/34/dist/250", "MiddleEast_Israel"),
-    ("https://opendata.adsb.fi/api/v3/lat/24/lon/46/dist/250", "MiddleEast_Saudi"),
-]
 
-def fetch_opensky_data():
-    """Fetch global state vectors from OpenSky Network (Free API)."""
-    try:
-        # OpenSky global states (anonymous access has rate limits but works)
-        url = "https://opensky-network.org/api/states/all"
-        response = requests.get(url, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            states = data.get('states', [])
-            aircraft = []
-            for s in states:
-                if s[5] is None or s[6] is None: continue # No lat/lon
-                aircraft.append({
-                    'hex': s[0],
-                    'flight': (s[1] or '').strip(),
-                    'r': '', # Registration not in simple states
-                    't': '', # Type not in simple states
-                    'lat': s[6],
-                    'lon': s[5],
-                    'alt_baro': s[7],
-                    'gs': s[9],
-                    'track': s[10],
-                    'squawk': s[14] or '----',
-                    'source': 'OpenSky'
-                })
-            return aircraft
-    except Exception as e:
-        print(f"OpenSky Fetch Error: {e}")
-    return []
 
-@app.route('/api/geo/regions')
-@login_required
-def get_flight_regions():
-    """Return the list of configured ADSB regions."""
-    regs = [{"name": r[1], "id": i} for i, r in enumerate(ADSB_REGIONS)]
-    # Add OpenSky as a virtual region
-    regs.append({"name": "Global_OpenSky", "id": -1})
-    return jsonify(regs)
 
-from concurrent.futures import ThreadPoolExecutor
 
-def fetch_region_data(url, region_name, headers):
-    """Helper to fetch data for a single region."""
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            return response.json().get('ac', [])
-    except Exception as e:
-        print(f"Error fetching {region_name}: {e}")
-    return []
+    
 
 @app.route('/api/geo/flights')
-@login_required
 def get_flight_data():
-    """Fetch live flight data from adsb.fi API (comprehensive global coverage using v3)."""
+    """Fetch live flight data from adsb.one API (comprehensive global coverage)."""
     search_q = request.args.get('q', '').strip().upper()
-    region_idx = request.args.get('region_idx', type=int)
     
-    headers = {"User-Agent": "SkyScanFlightTracker/1.0 (HayOS Uplink)"}
+    # adsb.one provides excellent global coverage - query multiple regions
+    # Format: /v2/point/{lat}/{lon}/{radius_nm}
+    regions = [
+        ("https://api.adsb.one/v2/point/40/-100/4000", "Americas"),   # North America
+        ("https://api.adsb.one/v2/point/50/10/3000", "Europe"),       # Europe
+        ("https://api.adsb.one/v2/point/25/80/3000", "Asia"),         # South Asia
+        ("https://api.adsb.one/v2/point/35/135/2500", "EastAsia"),    # East Asia
+        ("https://api.adsb.one/v2/point/-25/135/2000", "Oceania"),    # Australia
+        ("https://api.adsb.one/v2/point/60/90/4000", "Russia"),       # Russia/Eurasia
+        ("https://api.adsb.one/v2/point/35/105/2500", "China"),       # China/Central Asia
+        ("https://api.adsb.one/v2/point/-15/-60/3000", "SouthAmerica"), # South America
+        ("https://api.adsb.one/v2/point/5/20/3500", "Africa"),          # Africa
+    ]
+    
     all_flights = {}  # Use dict to dedupe by hex
     
-    selected_regions = []
-    if region_idx is not None and 0 <= region_idx < len(ADSB_REGIONS):
-        selected_regions = [ADSB_REGIONS[region_idx]]
-    else:
-        selected_regions = ADSB_REGIONS
-
-    # Use ThreadPoolExecutor for high-parallelism fetching
-    aircraft_data = []
-    
-    # Always fetch all regions and OpenSky for a unified view
-    with ThreadPoolExecutor(max_workers=25) as executor:
-        # 1. Fetch OpenSky
-        os_future = executor.submit(fetch_opensky_data)
-        
-        # 2. Fetch all ADSB regions
-        # If a specific region_idx is provided, we still obey it for targeted scans, 
-        # but the default (no region_idx) will fetch EVERYTHING.
-        target_regions = selected_regions if region_idx is not None else ADSB_REGIONS
-        adsb_futures = [executor.submit(fetch_region_data, url, name, headers) for url, name in target_regions]
-        
-        # 3. Combine results
-        aircraft_data.extend(os_future.result())
-        for future in adsb_futures:
-            aircraft_data.extend(future.result())
-
-    for ac in aircraft_data:
-        # Skip if no position data
-        if ac.get('lat') is None or ac.get('lon') is None:
+    for url, region_name in regions:
+        try:
+            response = requests.get(url, timeout=20)
+            if response.status_code == 200:
+                data = response.json()
+                aircraft_list = data.get('ac', [])
+                
+                for ac in aircraft_list:
+                    # Skip if no position data
+                    if ac.get('lat') is None or ac.get('lon') is None:
+                        continue
+                    
+                    hex_code = ac.get('hex', '').upper()
+                    if hex_code in all_flights:
+                        continue  # Already have this aircraft
+                    
+                    callsign = (ac.get('flight', '') or '').strip() or ac.get('r', '') or hex_code
+                    registration = ac.get('r', '')
+                    aircraft_type = ac.get('t', '')
+                    
+                    # Apply search filter if provided
+                    if search_q:
+                        if search_q not in hex_code and search_q not in callsign.upper() and search_q not in registration.upper():
+                            continue
+                    
+                    # Type classification with color coding
+                    # Military detection
+                    mil_prefixes = ['RCH', 'SPAR', 'SAM', 'AF1', 'MAGMA', 'ASCOT', 'BAF', 'GAF', 
+                                   'PLF', 'DUKE', 'NAVY', 'COBRA', 'VIPER', 'REACH', 'EVAC']
+                    mil_types = ['C17', 'C130', 'C5', 'KC135', 'KC10', 'F15', 'F16', 'F18', 
+                                'F22', 'F35', 'B52', 'B1', 'B2', 'E3', 'E6', 'P8', 'V22']
+                    
+                    is_mil = any(callsign.upper().startswith(p) for p in mil_prefixes) or \
+                             any(t in aircraft_type.upper() for t in mil_types)
+                    
+                    # Private aircraft detection  
+                    priv_types = ['C172', 'C182', 'C208', 'PA28', 'SR22', 'TBM9', 'PC12', 'CL60', 'C152', 'PA32']
+                    is_priv = (callsign.startswith('N') and len(callsign) <= 6) or \
+                              callsign.startswith('G-') or callsign.startswith('VH-') or \
+                              aircraft_type.upper() in priv_types
+                    
+                    # Emergency detection
+                    is_emergency = ac.get('emergency', 'none') != 'none' or ac.get('squawk') == '7700'
+                    
+                    # Default to commercial (blue) - all flights visible!
+                    f_type = "commercial"
+                    if is_emergency: f_type = "emergency"
+                    elif is_mil: f_type = "military"
+                    elif is_priv: f_type = "private"
+                    
+                    all_flights[hex_code] = {
+                        "icao24": hex_code.lower(),
+                        "callsign": callsign,
+                        "registration": registration or "---",
+                        "aircraft_type": aircraft_type or "---",
+                        "long": ac.get('lon'),
+                        "lat": ac.get('lat'),
+                        "alt": ac.get('alt_baro') or ac.get('alt_geom') or 0,
+                        "velocity": ac.get('gs', 0),
+                        "heading": ac.get('track', 0),
+                        "squawk": ac.get('squawk', '----'),
+                        "type": f_type
+                    }
+        except Exception as e:
+            print(f"Error fetching {region_name}: {e}")
             continue
-        
-        hex_code = (ac.get('hex') or ac.get('icao') or '').upper()
-        if not hex_code or hex_code in all_flights:
-            continue  # Already have this aircraft
-        
-        # Field mapping with better fallbacks
-        # ADSB.fi uses 'flight' for callsign, 'r' for registration, 't' for type
-        # OpenSky uses 'flight' for callsign
-        callsign = (ac.get('flight', '') or '').strip()
-        registration = ac.get('r', '') or ac.get('reg', '')
-        aircraft_type = ac.get('t', '') or ac.get('type', '')
-        squawk = ac.get('squawk') or '----'
-        
-        # If callsign is missing, use hex
-        if not callsign: callsign = hex_code
-        
-        # Apply search filter if provided
-        if search_q:
-            if search_q not in hex_code and search_q not in callsign.upper() and search_q not in (registration or '').upper():
-                continue
-        
-        # Type classification with color coding
-        # Military detection
-        mil_prefixes = ['RCH', 'SPAR', 'SAM', 'AF1', 'MAGMA', 'ASCOT', 'BAF', 'GAF', 
-                       'PLF', 'DUKE', 'NAVY', 'COBRA', 'VIPER', 'REACH', 'EVAC']
-        mil_types = ['C17', 'C130', 'C5', 'KC135', 'KC10', 'F15', 'F16', 'F18', 
-                    'F22', 'F35', 'B52', 'B1', 'B2', 'E3', 'E6', 'P8', 'V22']
-        
-        is_mil = any(callsign.upper().startswith(p) for p in mil_prefixes) or \
-                 any(t in (aircraft_type or '').upper() for t in mil_types)
-        
-        # Private aircraft detection  
-        priv_types = ['C172', 'C182', 'C208', 'PA28', 'SR22', 'TBM9', 'PC12', 'CL60', 'C152', 'PA32']
-        is_priv = (callsign.startswith('N') and len(callsign) <= 6) or \
-                  callsign.startswith('G-') or callsign.startswith('VH-') or \
-                  (aircraft_type or '').upper() in priv_types
-        
-        # Emergency detection
-        is_emergency = ac.get('emergency', 'none') != 'none' or squawk == '7700'
-        
-        # Default to commercial (blue) - all flights visible!
-        f_type = "commercial"
-        if is_emergency: f_type = "emergency"
-        elif is_mil: f_type = "military"
-        elif is_priv: f_type = "private"
-        
-        all_flights[hex_code] = {
-            "icao24": hex_code.lower(),
-            "callsign": callsign,
-            "registration": registration or "---",
-            "aircraft_type": aircraft_type or "---",
-            "long": ac.get('lon') or ac.get('lon'), # Handle different param names if any
-            "lat": ac.get('lat') or ac.get('lat'),
-            "alt": ac.get('alt_baro') or ac.get('alt_geom') or ac.get('alt') or 0,
-            "velocity": ac.get('gs') or ac.get('speed') or 0,
-            "heading": ac.get('track') or ac.get('heading') or 0,
-            "squawk": squawk,
-            "type": f_type,
-            "source": ac.get('source', 'ADSB.fi')
-        }
     
     return jsonify(list(all_flights.values()))
+
+
+
+@app.route('/api/geo/towers')
+def get_towers():
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        
+        if not lat or not lon:
+            lat = 51.505
+            lon = -0.09
+
+        # Calculate Bounding Box (approx 5-10km radius)
+        # 1 deg lat ~= 111km. 0.05 ~= 5.5km
+        min_lat = lat - 0.05
+        max_lat = lat + 0.05
+        min_lon = lon - 0.05
+        max_lon = lon + 0.05
+        bbox = f"{min_lat},{min_lon},{max_lat},{max_lon}"
+
+        # Using OpenCellID 'getInArea' API
+        response = requests.get(
+            'http://opencellid.org/cell/getInArea',
+            params={
+                "key": OPENCELLID_API_KEY,
+                "BBOX": bbox,
+                "format": "json"
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+            except:
+                return jsonify({"error": "API returned non-JSON", "details": response.text[:100]})
+
+            towers = []
+            cells = data.get('cells', []) if isinstance(data, dict) else data
+            
+            if isinstance(cells, list):
+                for cell in cells:
+                    towers.append({
+                        "id": str(cell.get('cellid', 'Unknown')),
+                        "lat": float(cell.get('lat')),
+                        "lon": float(cell.get('lon')),
+                        "lac": cell.get('lac', 0),
+                        "mcc": cell.get('mcc', 0),
+                        "mnc": cell.get('mnc', 0),
+                        "signal": cell.get('signal', 0),
+                        "radio": cell.get('radio', 'gsm')
+                    })
+            
+            return jsonify(towers)
+            
+        else:
+            return jsonify({"error": f"Upstream API error: {response.status_code}", "details": response.text[:100]}), 502
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/geo/celltower')
+def get_celltower_click():
+    try:
+        lat = request.args.get('lat', type=float)
+        lon = request.args.get('lon', type=float)
+        
+        if not lat or not lon:
+            return jsonify({"error": "Missing coordinates"}), 400
+
+        # Small BBOX for specific location (approx 2km radius)
+        min_lat = lat - 0.01
+        max_lat = lat + 0.01
+        min_lon = lon - 0.01
+        max_lon = lon + 0.01
+        bbox = f"{min_lon},{min_lat},{max_lon},{max_lat}"
+
+        # Using the endpoint provided by user logic
+        response = requests.get(
+            'https://www.opencellid.org/ajax/getCells.php',
+            params={
+                "bbox": bbox
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            try:
+                data = response.json()
+            except:
+                return jsonify({"error": "API returned non-JSON", "details": response.text[:100]})
+
+            towers = []
+            features = data.get('features', []) if isinstance(data, dict) else []
+            
+            for feature in features:
+                props = feature.get('properties', {})
+                geom = feature.get('geometry', {})
+                coords = geom.get('coordinates', [0, 0]) # [lon, lat]
+                
+                towers.append({
+                    "id": str(props.get('cellid', props.get('unit', 'Unknown'))),
+                    "lat": float(coords[1]),
+                    "lon": float(coords[0]),
+                    "lac": props.get('area', 0),
+                    "mcc": props.get('mcc', 0),
+                    "mnc": props.get('net', 0),
+                    "signal": props.get('samples', 0), 
+                    "radio": props.get('radio', 'gsm')
+                })
+            
+            return jsonify(towers)
+        else:
+            return jsonify({"error": f"Upstream API error: {response.status_code}", "details": response.text[:100]}), 502
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # --- VESSEL HARBOR UPLINK ---
 # Global cache for AIS data
@@ -363,7 +397,6 @@ def start_ais_websocket():
     async def ais_stream():
         global _ais_vessels_cache
         
-        api_key = "API_KEY"
         
         async with websockets.connect("wss://stream.aisstream.io/v0/stream") as websocket:
             # Subscribe to global ship positions
@@ -546,7 +579,6 @@ def start_ais_websocket():
     print("AIS WebSocket thread started")
 
 @app.route('/api/geo/vessels')
-
 def get_vessel_data():
     """Fetch REAL live vessel data from AISstream.io"""
     global _ais_vessels_cache, _ais_websocket_task
@@ -580,7 +612,6 @@ def get_vessel_data():
 from contextlib import nullcontext
 
 @app.route('/api/geo/vessel/path/<mmsi>')
-
 def get_vessel_path(mmsi):
     """Generate a realistic historical path for a vessel."""
     import random
@@ -602,266 +633,8 @@ def get_vessel_path(mmsi):
 
 from ultralytics import YOLO
 
-# Load YOLO model globally
-yolo_seg_model = None
-
-@app.route('/api/geo/segment')
-
-def geo_segment():
-    """
-    Advanced YOLO-based Aerial Segmentation.
-    Uses Ultralytics YOLOv8-seg to identify and mask structures from satellite tiles.
-    Supports both point-based (lat/lon) and region-based (bbox) analysis.
-    """
-    global yolo_seg_model
-    try:
-        lat = float(request.args.get('lat', 0))
-        lon = float(request.args.get('lon', 0))
-        zoom = int(request.args.get('zoom', 18))
-        bbox_str = request.args.get('bbox', None)  # Format: "minLat,minLon,maxLat,maxLon"
-
-        # Parse bbox if provided for region filtering
-        bbox_filter = None
-        if bbox_str:
-            try:
-                bbox_parts = [float(x.strip()) for x in bbox_str.split(',')]
-                if len(bbox_parts) == 4:
-                    bbox_filter = {
-                        'minLat': bbox_parts[0],
-                        'minLon': bbox_parts[1],
-                        'maxLat': bbox_parts[2],
-                        'maxLon': bbox_parts[3]
-                    }
-            except:
-                pass
-
-        # 1. Fetch Satellite Tile
-        n = 2.0 ** zoom
-        xtile = int((lon + 180.0) / 360.0 * n)
-        ytile = int((1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n)
-
-        tile_url = f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{ytile}/{xtile}"
-        resp = requests.get(tile_url, headers={'User-Agent': 'HayOS/1.0'}, timeout=10)
-        
-        if resp.status_code != 200:
-             return jsonify({'error': 'Imagery Offline'}), 502
-
-        image_array = np.asarray(bytearray(resp.content), dtype=np.uint8)
-        img = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-
-        if img is None:
-             return jsonify({'error': 'Buffer Decode Error'}), 500
-        
-        # 2. YOLO Segmentation
-        if yolo_seg_model is None:
-            # Use nano segmentation model for performance
-            yolo_seg_model = YOLO('yolov8n-seg.pt')
-
-        results = yolo_seg_model(img, conf=0.25)[0]
-        
-        features = []
-        
-        # Tile Math for coordinate conversion
-        lon_deg = (xtile / n * 360.0) - 180.0
-        lat_rad = math.atan(math.sinh(math.pi * (1 - 2 * ytile / n)))
-        lat_deg = math.degrees(lat_rad)
-        lat_rad_next = math.atan(math.sinh(math.pi * (1 - 2 * (ytile + 1) / n)))
-        lat_deg_next = math.degrees(lat_rad_next)
-        total_lat_diff = lat_deg - lat_deg_next
-        
-        # YOLO class mapping to HayOS labels
-        if results.masks is not None:
-            for i, (mask, box) in enumerate(zip(results.masks.xy, results.boxes)):
-                class_id = int(box.cls[0])
-                confidence = float(box.conf[0])
-                
-                # Filter small noise
-                if len(mask) < 3: continue
-                
-                geo_points = []
-                for pt in mask:
-                    px, py = pt
-                    # Satellite tiles are typically 256x256
-                    h, w = img.shape[:2]
-                    p_lon = lon_deg + (px / float(w)) * (360.0 / n)
-                    p_lat = lat_deg - (py / float(h)) * total_lat_diff
-                    geo_points.append([p_lon, p_lat])
-                
-                # Close the polygon
-                geo_points.append(geo_points[0])
-
-                # Heuristic Labeling based on YOLO classes
-                label = "STRUCTURE_UNIT"
-                sub_type = "GENERAL_SECTOR"
-                
-                if class_id in [2, 3, 5, 7]: # car, motorcycle, bus, truck
-                    label = "TRANS_CLASS"
-                    sub_type = "VEHICLE_LOGISTICS"
-                elif class_id == 0: # person
-                    label = "BIO_DETECT"
-                    sub_type = "HUMAN_PRESENCE"
-                elif class_id in [56, 57, 58, 59, 60, 61]: # chair, couch, potted plant, bed, dining table, toilet
-                    label = "INFRA_CLASS"
-                    sub_type = "INTERIOR_ELEMENT"
-                
-                # Estimate area in pixels (approximate)
-                area = cv2.contourArea(np.array(mask).astype(np.float32))
-
-                # Calculate Geographic Bounding Box
-                # box.xyxy[0] contains [x1, y1, x2, y2] in pixels
-                x1, y1, x2, y2 = box.xyxy[0]
-                h_img, w_img = img.shape[:2]
-                
-                bbox_geo = [
-                    [lon_deg + (x1 / float(w_img)) * (360.0 / n), lat_deg - (y1 / float(h_img)) * total_lat_diff], # Top-Left
-                    [lon_deg + (x2 / float(w_img)) * (360.0 / n), lat_deg - (y2 / float(h_img)) * total_lat_diff]  # Bottom-Right
-                ]
-
-                # Filter by bbox if provided
-                if bbox_filter:
-                    center_lat = (bbox_geo[0][1] + bbox_geo[1][1]) / 2
-                    center_lon = (bbox_geo[0][0] + bbox_geo[1][0]) / 2
-                    if not (bbox_filter['minLat'] <= center_lat <= bbox_filter['maxLat'] and 
-                           bbox_filter['minLon'] <= center_lon <= bbox_filter['maxLon']):
-                        continue  # Skip this detection if outside bbox
-
-                features.append({
-                    "type": "Feature",
-                    "geometry": {"type": "Polygon", "coordinates": [geo_points]},
-                    "properties": {
-                        "id": f"YOLO-{class_id}-{i}",
-                        "classification": label,
-                        "type": sub_type,
-                        "area": f"{int(area)} px",
-                        "status": "VALIDATED",
-                        "confidence": f"{int(confidence * 100)}%",
-                        "bbox": bbox_geo
-                    }
-                })
-
-        return jsonify({
-            "type": "FeatureCollection",
-            "features": features,
-            "metadata": {
-                "engine": "YOLO_V8_SEG",
-                "objects": len(features),
-                "sector": f"{xtile}/{ytile}"
-            }
-        })
-    except Exception as e:
-        app.logger.error(f"SEG_CRITICAL: {e}")
-        return jsonify({'error': str(e)}), 500
-
-def get_exif_gps(img_pil):
-    """Extract GPS coordinates from PIL Image EXIF data."""
-    try:
-        exif = img_pil._getexif()
-        if not exif:
-            return None
-        
-        gps_info = {}
-        for tag, value in exif.items():
-            decoded = ExifTags.TAGS.get(tag, tag)
-            if decoded == "GPSInfo":
-                for t in value:
-                    sub_decoded = ExifTags.GPSTAGS.get(t, t)
-                    gps_info[sub_decoded] = value[t]
-        
-        if not gps_info:
-            return None
-
-        def convert_to_degrees(value):
-            d = float(value[0])
-            m = float(value[1])
-            s = float(value[2])
-            return d + (m / 60.0) + (s / 3600.0)
-
-        lat = convert_to_degrees(gps_info["GPSLatitude"])
-        if gps_info["GPSLatitudeRef"] != "N":
-            lat = -lat
-        
-        lon = convert_to_degrees(gps_info["GPSLongitude"])
-        if gps_info["GPSLongitudeRef"] != "E":
-            lon = -lon
-            
-        return {"lat": lat, "lon": lon}
-    except Exception as e:
-        app.logger.error(f"GPS_EXIF_ERR: {e}")
-        return None
-
-@app.route('/api/geo/analyze-upload', methods=['POST'])
-@app.route('/upload', methods=['POST'])
-
-def analyze_upload():
-    """Analyze uploaded image for objects and GPS metadata."""
-    global yolo_seg_model
-    # Check both 'image' and 'img' (user's provided form name)
-    field_name = 'image' if 'image' in request.files else 'img'
-    
-    if field_name not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
-        
-    file = request.files[field_name]
-    if file.filename == '':
-        return jsonify({"error": "Empty filename"}), 400
-        
-    try:
-        # 1. Load Image
-        in_memory_file = io.BytesIO()
-        file.save(in_memory_file)
-        data = np.frombuffer(in_memory_file.getvalue(), dtype=np.uint8)
-        img = cv2.imdecode(data, cv2.IMREAD_COLOR)
-        
-        if img is None:
-            return jsonify({"error": "Invalid image format"}), 400
-            
-        # 2. Extract Location
-        img_pil = Image.open(io.BytesIO(in_memory_file.getvalue()))
-        location = get_exif_gps(img_pil)
-        
-        # 3. Run YOLO Discovery
-        if yolo_seg_model is None:
-            yolo_seg_model = YOLO('yolov8n-seg.pt')
-            
-        results = yolo_seg_model(img, conf=0.25)[0]
-        detections = []
-        
-        if results.boxes is not None:
-            for box in results.boxes:
-                class_id = int(box.cls[0])
-                confidence = float(box.conf[0])
-                label = results.names[class_id].upper()
-                
-                detections.append({
-                    "object": label,
-                    "confidence": f"{int(confidence * 100)}%",
-                    "tag": f"DISCOVERY_{class_id}"
-                })
-        
-        # 4. Return Data
-        return jsonify({
-            "status": "ANALYSIS_COMPLETE",
-            "location": location or {"lat": "UNKNOWN", "lon": "UNKNOWN"},
-            "objects": detections,
-            "count": len(detections),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-        
-    except Exception as e:
-        app.logger.error(f"UPLOAD_ANALYSIS_CRITICAL: {e}")
-        return jsonify({"error": str(e)}), 500
-@app.route('/api/geo/flight/meta/<callsign>')
-def get_flight_meta(callsign):
-    # Mock implementation for flight metadata
-    return jsonify({
-        "callsign": callsign,
-        "image": f"https://cdn.jetphotos.com/full/5/{random.randint(10000, 99999)}.jpg",
-        "operator": "Unknown Operator",
-        "age": f"{random.randint(1, 25)} years"
-    })
 
 @app.route('/api/geo/news')
-
 def get_geo_news():
     """
     Fetch geopolitical news and tweets for a specific location.
@@ -885,70 +658,19 @@ def get_geo_news():
     real_tweets = []
     real_news = []
     
-    # --- 1. Try Real Twitter API v2 (Search) ---
-    # Using Bearer Token is easiest for Search v2
-    if TWITTER_BEARER_TOKEN and TWITTER_BEARER_TOKEN != 'YOUR_BEARER_TOKEN_HERE':
-        try:
-            headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+    # --- 1. Location Detection (Geocoding) ---
+    location_query = ""
+    detected_region = ""
+    try:
+        geo_url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+        geo_res = requests.get(geo_url, timeout=2, headers={'User-Agent': 'HayOS/1.0'})
+        if geo_res.status_code == 200:
+            geo_data = geo_res.json()
+            address = geo_data.get('address', {})
+            location_query = address.get('country', '') or address.get('city', '') or address.get('state', '')
+            print(f"Reverse geocode: {location_query}")
             
-            # Twitter API v2 Recent Search - NOTE: This requires ELEVATED access (not free tier)
-            # Free tier (Essential) does NOT have access to search endpoints
-            # We'll try anyway in case user has elevated access
-            params = {
-                'query': '(breaking OR news OR alert) -is:retweet lang:en',
-                'max_results': 2,
-                'tweet.fields': 'created_at,author_id,text'
-            }
-            
-            response = requests.get('https://api.twitter.com/2/tweets/search/recent', headers=headers, params=params, timeout=5)
-            
-            print(f"Twitter API Status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'data' in data:
-                    for t in data['data']:
-                        # Parse timestamp
-                        created = t.get('created_at', '')
-                        try:
-                            dt = datetime.strptime(created, '%Y-%m-%dT%H:%M:%S.%fZ')
-                            time_str = dt.strftime('%H:%M:%S')
-                        except:
-                            time_str = 'Recent'
-                            
-                        real_tweets.append({
-                            "user": f"@User_{t.get('author_id', 'Unknown')[-4:]}",
-                            "text": t.get('text', ''),
-                            "timestamp": time_str
-                        })
-                    print(f"Twitter: Fetched {len(real_tweets)} tweets")
-                else:
-                    print(f"Twitter API response has no 'data': {data}")
-            else:
-                print(f"Twitter API Error: {response.status_code} - {response.text[:200]}")
-                
-        except Exception as e:
-            print(f"Twitter API Exception: {e}")
-
-    # --- 2. Try Real NewsAPI with Location Context ---
-    if NEWS_API_KEY and NEWS_API_KEY != 'mock_news_key':
-        try:
-            # Try to get location name via reverse geocoding
-            location_query = ""
-            try:
-                geo_url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
-                geo_res = requests.get(geo_url, timeout=2, headers={'User-Agent': 'HayOS/1.0'})
-                if geo_res.status_code == 200:
-                    geo_data = geo_res.json()
-                    # Try to extract country or city
-                    address = geo_data.get('address', {})
-                    location_query = address.get('country', '') or address.get('city', '') or address.get('state', '')
-                    print(f"Reverse geocode: {location_query}")
-            except Exception as geo_err:
-                print(f"Geocoding error: {geo_err}")
-            
-            # --- Regional RSS Detection ---
-            detected_region = ""
+            # Regional Mapping
             country_mapping = {
                 "United States": "USA", "India": "INDIA", "China": "CHINA",
                 "Russia": "RUSSIA", "Japan": "JAPAN", "Australia": "AUSTRALIA",
@@ -962,39 +684,56 @@ def get_geo_news():
                     break
             
             if not detected_region and location_query:
-                # Broad region checks
                 if any(x in location_query for x in ["Europe", "France", "Germany", "Spain", "Italy", "UK", "London"]):
-                     detected_region = "EUROPE"
+                    detected_region = "EUROPE"
                 elif any(x in location_query for x in ["Africa", "Kenya", "Nigeria", "Egypt", "South Africa"]):
-                     detected_region = "AFRICA"
-            
-            if detected_region:
-                print(f"Uplinking regional RSS: {detected_region}")
-                rss_geo = fetch_rss_news(detected_region)
-                real_news.extend(rss_geo[:5]) # Mix in some RSS
+                    detected_region = "AFRICA"
+    except Exception as geo_err:
+        print(f"Geocoding error: {geo_err}")
 
-            # Build NewsAPI query
-            if location_query:
-                # Search for news about this location (all languages)
-                news_url = f"https://newsapi.org/v2/everything?q={location_query}&sortBy=publishedAt&pageSize=10&apiKey={NEWS_API_KEY}"
-            else:
-                # Fallback to top headlines (all languages)
-                news_url = f"https://newsapi.org/v2/top-headlines?pageSize=10&apiKey={NEWS_API_KEY}"
-            
+    # --- 2. Try Real Twitter API v2 (Search) ---
+    if TWITTER_BEARER_TOKEN and TWITTER_BEARER_TOKEN != 'YOUR_BEARER_TOKEN_HERE':
+        try:
+            headers = {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+            params = {
+                'query': '(breaking OR news OR alert) -is:retweet lang:en',
+                'max_results': 2,
+                'tweet.fields': 'created_at,author_id,text'
+            }
+            response = requests.get('https://api.twitter.com/2/tweets/search/recent', headers=headers, params=params, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data:
+                    for t in data['data']:
+                        created = t.get('created_at', '')
+                        try:
+                            dt = datetime.strptime(created, '%Y-%m-%dT%H:%M:%S.%fZ')
+                            time_str = dt.strftime('%H:%M:%S')
+                        except:
+                            time_str = 'Recent'
+                        real_tweets.append({"user": f"@User_{t.get('author_id', 'Unknown')[-4:]}", "text": t.get('text', ''), "timestamp": time_str})
+        except Exception as e: print(f"Twitter API Exception: {e}")
+
+    # --- 3. Try Regional RSS (Authentic Feeds) ---
+    if detected_region:
+        print(f"Uplinking regional RSS: {detected_region}")
+        rss_geo = fetch_rss_news(detected_region)
+        real_news.extend(rss_geo[:15])
+
+    # --- 4. Try NewsAPI (If available) ---
+    if NEWS_API_KEY and NEWS_API_KEY != 'mock_news_key':
+        try:
+            news_url = f"https://newsapi.org/v2/everything?q={location_query or 'world news'}&sortBy=publishedAt&pageSize=10&apiKey={NEWS_API_KEY}"
             n_res = requests.get(news_url, timeout=5)
-            print(f"NewsAPI Status: {n_res.status_code}")
-            
             if n_res.status_code == 200:
                 n_data = n_res.json()
                 for article in n_data.get('articles', [])[:50]:
-                    # Parse timestamp
                     pub_time = article.get('publishedAt', '')
                     try:
                         dt = datetime.strptime(pub_time, '%Y-%m-%dT%H:%M:%SZ')
                         time_str = dt.strftime('%H:%M %b %d')
                     except:
                         time_str = 'Recent'
-                        
                     real_news.append({
                         "source": article.get('source', {}).get('name', 'NewsAPI'),
                         "title": article.get('title', ''),
@@ -1003,13 +742,15 @@ def get_geo_news():
                         "published": pub_time or datetime.now(timezone.utc).isoformat(),
                         "type": "GEO_INTEL"
                     })
-                print(f"NewsAPI: Fetched {len(real_news)} articles")
-            else:
-                print(f"NewsAPI Error: {n_res.status_code} - {n_res.text[:200]}")
-        except Exception as e:
-             print(f"News API Exception: {e}")
+        except Exception as e: print(f"News API Exception: {e}")
 
-    # --- 3. Mock Fallback (If APIs didn't yield results) ---
+    # --- 5. International Fallback (If no regional news found) ---
+    if not real_news:
+        print("Fallback to International RSS Intelligence...")
+        intl_news = fetch_rss_news("INTERNATIONAL")
+        real_news.extend(intl_news[:15])
+
+    # --- 6. Final Mock Fallback (If all else fails) ---
     sentiment_score = random.uniform(0.1, 0.9)
     sentiment_label = "NEUTRAL"
     if sentiment_score > 0.7: sentiment_label = "STABLE"
@@ -1026,14 +767,8 @@ def get_geo_news():
             })
 
     if not real_news:
-        headlines = [
-            "Regional security alert issued for this sector.",
-            "Infrastructure development updates pending.",
-            "Local communications monitoring active.",
-            "Weather systems affecting transport logic.",
-            "Cyber-surveillance grid expansion initiated."
-        ]
-        for _ in range(random.randint(2, 3)):
+        headlines = ["Local communications monitoring active.", "Regional security alert issued.", "Cyber-surveillance network link stable."]
+        for _ in range(3):
             real_news.append({
                 "source": "GNN (Global News Network)",
                 "title": random.choice(headlines),
@@ -1043,6 +778,15 @@ def get_geo_news():
                 "type": "MOCK_INTEL"
             })
         
+    # --- 7. AI Intelligence Summary ---
+    context_str = f"LOCATION: {location_query or 'Unknown Sector'}\n"
+    if real_news:
+        context_str += "LATEST_HEADLINES:\n" + "\n".join([f"- {n['title']} ({n['source']})" for n in real_news[:5]]) + "\n"
+    if real_tweets:
+        context_str += "INTERCEPTED_SIGNALS:\n" + "\n".join([f"- {t['text']}" for t in real_tweets[:3]]) + "\n"
+    
+    ai_summary = analyze_with_ai(context_str)
+
     result_data = {
         "lat": lat,
         "lon": lon,
@@ -1053,7 +797,7 @@ def get_geo_news():
         },
         "tweets": real_tweets,
         "news": real_news,
-        "intel_summary": f"Sector scan complete. {len(real_tweets)} signals intercepted."
+        "intel_summary": ai_summary
     }
 
     # Store in cache
@@ -1093,7 +837,6 @@ def analyze_with_ai(context):
     return "ANALYSIS_OFFLINE: Connectivity to Neural Core interrupted."
 
 @app.route('/api/news/analyze', methods=['POST'])
-
 def analyze_news_sentiment():
     data = request.json
     content = data.get('content', '')
@@ -1104,7 +847,6 @@ def analyze_news_sentiment():
     return jsonify({"analysis": analysis})
 
 @app.route('/api/market/data')
-
 def get_market_data():
     """
     Fetch market data for Oil, Gold, Silver, and Crypto.
@@ -1198,6 +940,7 @@ def fetch_rss_news(region):
     return articles
 
 @app.route('/api/news/advanced')
+
 def get_advanced_news():
     lat = request.args.get('lat')
     lon = request.args.get('lon')
@@ -1361,7 +1104,9 @@ def get_advanced_news():
         "count": len(news_articles)
     })
 
+
 @app.route('/api/translate')
+
 def translate_text():
     """
     Translate text to English using free translation service.
@@ -1449,16 +1194,722 @@ def get_flight_meta(callsign):
 
 
 
+  # ================================================================
+# GEOSENTIAL AI ROUTE - Ollama Phi Integration with Web Search
+# ================================================================
+import requests as req_ollama
+
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_MODEL = "phi:latest"
+EMBEDDING_MODEL = "all-minilm:latest"
+
+# --- Hugging Face Configuration  ---
+
+HF_URL = "https://router.huggingface.co/v1/chat/completions"
+MODEL_ID = "meta-llama/Llama-3.1-8B-Instruct:cerebras"
+HEADERS = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
+
+# ================================================================
+# GEOSENTIAL VECTOR DATABASE (ChromaDB)
+# ================================================================
+import chromadb
+from chromadb.utils import embedding_functions
+
+CHROMA_DB_PATH = "./geosent_chroma_db"
+COLLECTION_NAME = "geosent_memory"
+
+def init_chroma_db():
+    """Initialize ChromaDB client and collection."""
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
+        # using all-MiniLM-L6-v2 as default embedding function
+        sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+        collection = client.get_or_create_collection(name=COLLECTION_NAME, embedding_function=sentence_transformer_ef)
+        print(f"ChromaDB: Initialized collection '{COLLECTION_NAME}'")
+        return client, collection
+    except Exception as e:
+        print(f"ChromaDB Init Error: {e}")
+        return None, None
+
+chroma_client, memory_collection = init_chroma_db()
+
+def save_conversation(user_message, ai_response):
+    """Save conversation to ChromaDB as vector memory."""
+    if not memory_collection: return
+    try:
+        # We store the interaction as a single document
+        doc_id = f"mem_{int(time.time()*1000)}"
+        text_content = f"User: {user_message}\nAI: {ai_response}"
+        
+        memory_collection.add(
+            documents=[text_content],
+            metadatas=[{"timestamp": datetime.now().isoformat(), "type": "conversation"}],
+            ids=[doc_id]
+        )
+        print(f"ChromaDB: Saved memory {doc_id}")
+    except Exception as e:
+        print(f"ChromaDB Save Error: {e}")
+
+def get_relevant_memories(query_text, n_results=3):
+    """Retrieve semantically relevant memories."""
+    if not memory_collection: return []
+    try:
+        results = memory_collection.query(
+            query_texts=[query_text],
+            n_results=n_results
+        )
+        # results['documents'] is a list of lists
+        return results['documents'][0] if results['documents'] else []
+    except Exception as e:
+        print(f"ChromaDB Query Error: {e}")
+        return []
+
+def get_conversation_context(current_query):
+    """Build context string from relevant vector memories."""
+    memories = get_relevant_memories(current_query, n_results=3)
+    if not memories:
+        return ""
+    
+    context_str = "RELEVANT MEMORY STREAM (ChromaDB):\n"
+    for i, mem in enumerate(memories):
+        context_str += f"[{i+1}] {mem}\n"
+    return context_str + "\n"
+
+# --- Memory Management API Endpoints ---
+
+@app.route('/api/geosentialai/memory', methods=['GET'])
+def get_memories():
+    """List all memories (limited to recent/all for UI)."""
+    if not memory_collection:
+        return jsonify({"error": "Memory system offline"}), 500
+    try:
+        # Chroma doesn't have a simple 'get_all' without IDs, but we can peek or get by limit
+        # For simplicity in this UI, we'll fetch the last 20
+        count = memory_collection.count()
+        if count == 0:
+            return jsonify({"memories": []})
+            
+        # We can't easily sort by time in Chroma's get() without metadata filter complexities
+        # So we just get a batch. In production, you'd track IDs separate or use a mix.
+        # But `collection.get()` returns up to limit.
+        result = memory_collection.get(limit=50, include=['documents', 'metadatas'])
+        
+        memories = []
+        for i, doc_id in enumerate(result['ids']):
+            meta = result['metadatas'][i] if result['metadatas'] else {}
+            memories.append({
+                "id": doc_id,
+                "content": result['documents'][i],
+                "timestamp": meta.get('timestamp', 'Unknown')
+            })
+        
+        # Sort by timestamp desc (newest first)
+        memories.sort(key=lambda x: x['timestamp'], reverse=True)
+        return jsonify({"memories": memories, "count": count})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/geosentialai/memory/<memory_id>', methods=['DELETE'])
+def delete_memory(memory_id):
+    if not memory_collection: return jsonify({"error": "System offline"}), 500
+    try:
+        memory_collection.delete(ids=[memory_id])
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/geosentialai/memory/all', methods=['DELETE'])
+def clear_all_memories():
+    """Clear all entries from the memory collection."""
+    if not memory_collection: return jsonify({"error": "System offline"}), 500
+    try:
+        # ChromaDB requires getting all IDs first to delete
+        all_ids = memory_collection.get()['ids']
+        if all_ids:
+            memory_collection.delete(ids=all_ids)
+            print(f"ChromaDB: Cleared {len(all_ids)} memories")
+        return jsonify({"success": True, "count": len(all_ids)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/geosentialai/memory/<memory_id>', methods=['PUT'])
+def update_memory(memory_id):
+    if not memory_collection: return jsonify({"error": "System offline"}), 500
+    data = request.json
+    new_content = data.get('content')
+    if not new_content: return jsonify({"error": "No content"}), 400
+    
+    try:
+        # metadata update is optional, we just update document content
+        memory_collection.update(
+            ids=[memory_id],
+            documents=[new_content]
+        )
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Helper Scrapers ---
+def scrape_google_html(query):
+    results = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        # Google search URL
+        url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+            # Google's HTML structure changes often, but look for standard result containers
+            # Try looking for divs with class 'g' or 'tF2Cxc'
+            for g in soup.find_all('div', class_='g', limit=5):
+                anchors = g.find_all('a')
+                if anchors:
+                    link = anchors[0]['href']
+                    title = anchors[0].find('h3')
+                    if title:
+                        title = title.get_text()
+                        snippet_div = g.find('div', style='-webkit-line-clamp:2') # common snippet container
+                        snippet = snippet_div.get_text() if snippet_div else "Google Result"
+                        if link.startswith('http'):
+                            results.append({"title": title, "link": link, "snippet": snippet, "source": "Google"})
+    except Exception as e:
+        print(f"Google Scrape Error: {e}")
+    return results
+
+def scrape_bing_html(query):
+    results = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        url = f"https://www.bing.com/search?q={requests.utils.quote(query)}"
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+            # Bing results are usually in <li class="b_algo">
+            for li in soup.find_all('li', class_='b_algo', limit=5):
+                h2 = li.find('h2')
+                if h2:
+                    a = h2.find('a')
+                    if a:
+                        title = a.get_text()
+                        link = a['href']
+                        snippet_p = li.find('p')
+                        snippet = snippet_p.get_text() if snippet_p else "Bing Result"
+                        results.append({"title": title, "link": link, "snippet": snippet, "source": "Bing"})
+    except Exception as e:
+        print(f"Bing Scrape Error: {e}")
+    return results
+
+def scrape_ddg_html(query):
+    results = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36"
+        }
+        # Use html.duckduckgo.com for easier parsing
+        resp = requests.post("https://html.duckduckgo.com/html/", data={"q": query}, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for result in soup.find_all("div", class_="result", limit=5):
+                link_el = result.find("a", class_="result__a")
+                snippet_el = result.find("a", class_="result__snippet")
+                if link_el:
+                    title = link_el.get_text(strip=True)
+                    link = link_el["href"]
+                    snippet = snippet_el.get_text(strip=True) if snippet_el else ""
+                    results.append({"title": title, "link": link, "snippet": snippet, "source": "DuckDuckGo"})
+    except Exception as e:
+        print(f"DDG Scrape Error: {e}")
+    return results
+
+def scrape_darkweb(query):
+    """
+    Dark Web search via Tor proxy. Queries multiple .onion search engines.
+    Requires Tor service running on localhost:9050.
+    Based on Robin project: https://github.com/apurvsinghgautam/robin
+    """
+    import random
+    import re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    results = []
+    
+    # Dark Web Search Engines (.onion addresses) - Full List
+    DARKWEB_ENGINES = [
+        "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion/search/?q={query}",  # Ahmia
+        "http://3bbad7fauom4d6sgppalyqddsqbf5u5p56b5k5uk2zxsy3d6ey2jobad.onion/search?q={query}",  # OnionLand
+        "http://iy3544gmoeclh5de6gez2256v6pjh4omhpqdh2wpeeppjtvqmjhkfwad.onion/torgle/?query={query}",  # Torgle
+        "http://amnesia7u5odx5xbwtpnqk3edybgud5bmiagu75bnqx2crntw5kry7ad.onion/search?query={query}",  # Amnesia
+        "http://kaizerwfvp5gxu6cppibp7jhcqptavq3iqef66wbxenh6a2fklibdvid.onion/search?q={query}",  # Kaizer
+        "http://anima4ffe27xmakwnseih3ic2y7y3l6e7fucwk4oerdn4odf7k74tbid.onion/search?q={query}",  # Anima
+        "http://tornadoxn3viscgz647shlysdy7ea5zqzwda7hierekeuokh5eh5b3qd.onion/search?q={query}",  # Tornado
+        "http://tornetupfu7gcgidt33ftnungxzyfq2pygui5qdoyss34xbgx2qruzid.onion/search?q={query}",  # TorNet
+        "http://torlbmqwtudkorme6prgfpmsnile7ug2zm4u3ejpcncxuhpu4k2j4kyd.onion/index.php?a=search&q={query}",  # Torland
+        "http://findtorroveq5wdnipkaojfpqulxnkhblymc7aramjzajcvpptd4rjqd.onion/search?q={query}",  # Find Tor
+        "http://2fd6cemt4gmccflhm6imvdfvli3nf7zn6rfrwpsy7uhxrgbypvwf5fad.onion/search?query={query}",  # Excavator
+        "http://oniwayzz74cv2puhsgx4dpjwieww4wdphsydqvf5q7eyz4myjvyw26ad.onion/search.php?s={query}",  # Onionway
+        "http://tor66sewebgixwhcqfnp5inzp5x5uohhdy3kvtnyfxc2e5mxiuh34iid.onion/search?q={query}",  # Tor66
+        "http://3fzh7yuupdfyjhwt3ugzqqof6ulbcl27ecev33knxe3u7goi3vfn2qqd.onion/oss/index.php?search={query}",  # OSS
+        "http://torgolnpeouim56dykfob6jh5r2ps2j73enc42s2um4ufob3ny4fcdyd.onion/?q={query}",  # Torgol
+        "http://searchgf7gdtauh7bhnbyed4ivxqmuoat3nm6zfrg3ymkq6mtnpye3ad.onion/search?q={query}",  # The Deep Searches
+    ]
+    
+    USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:137.0) Gecko/20100101 Firefox/137.0",
+    ]
+    
+    def get_tor_session():
+        session = requests.Session()
+        # Tor SOCKS5 proxy on default port
+        session.proxies = {
+            "http": "socks5h://127.0.0.1:9050",
+            "https": "socks5h://127.0.0.1:9050"
+        }
+        return session
+    
+    def fetch_onion_search(endpoint, query_term):
+        url = endpoint.format(query=requests.utils.quote(query_term))
+        headers = {"User-Agent": random.choice(USER_AGENTS)}
+        try:
+            session = get_tor_session()
+            response = session.get(url, headers=headers, timeout=30)
+            if response.status_code == 200:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(response.text, "html.parser")
+                links = []
+                for a in soup.find_all('a'):
+                    try:
+                        href = a.get('href', '')
+                        title = a.get_text(strip=True)
+                        # Extract onion links
+                        onion_match = re.findall(r'https?://[a-z0-9\.]+\.onion[^\s"\']*', href)
+                        if onion_match and "search" not in onion_match[0].lower() and len(title) > 3:
+                            links.append({"title": title, "link": onion_match[0], "snippet": "Dark Web Result", "source": "TOR_NETWORK"})
+                    except:
+                        continue
+                return links
+        except Exception as e:
+            print(f"Darkweb Engine Error ({endpoint[:50]}...): {e}")
+        return []
+    
+    # Check if Tor is available (quick test)
+    try:
+        test_session = get_tor_session()
+        test_session.get("http://check.torproject.org", timeout=5)
+        tor_available = True
+    except:
+        tor_available = False
+        print("TOR_PROXY_UNAVAILABLE: Falling back to clearnet .onion proxies")
+    
+    if tor_available:
+        # Query multiple engines in parallel (up to 6)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(fetch_onion_search, endpoint, query) for endpoint in DARKWEB_ENGINES]
+            for future in as_completed(futures):
+                try:
+                    res = future.result()
+                    results.extend(res)
+                except:
+                    pass
+    else:
+        # Fallback: Use clearnet Ahmia proxy (ahmia.fi) - get more results
+        try:
+            headers = {"User-Agent": random.choice(USER_AGENTS)}
+            url = f"https://ahmia.fi/search/?q={requests.utils.quote(query)}"
+            resp = requests.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for li in soup.find_all("li", class_="result", limit=15):  # Increased from 5 to 15
+                    a = li.find("a")
+                    if a:
+                        title = a.get_text(strip=True)
+                        link = a.get("href", "")
+                        cite = li.find("cite")
+                        snippet = cite.get_text(strip=True) if cite else "Ahmia Result"
+                        results.append({"title": title, "link": link, "snippet": snippet, "source": "Ahmia_Clearnet"})
+        except Exception as e:
+            print(f"Ahmia Clearnet Error: {e}")
+    
+    # Deduplicate
+    seen = set()
+    unique = []
+    for r in results:
+        if r['link'] not in seen:
+            seen.add(r['link'])
+            unique.append(r)
+    
+    return unique
+
+@app.route('/api/tools/web_scan', methods=['POST'])
+def perform_web_scan():
+    """
+    Advanced Web Scraper Endpoint.
+    Handles aggressive scraping, different media types, and source filtering.
+    """
+    data = request.json or {}
+    query = data.get('query', '').strip()
+    scan_type = data.get('type', 'all')
+    sources = data.get('sources', [])
+    aggressive = data.get('aggressive', False)
+    if isinstance(sources, str):
+        sources = [sources]
+    
+    # 1. Modify Query based on Sources (Aggressive Mode)
+    site_map = {
+        'twitter': 'site:twitter.com',
+        'reddit': 'site:reddit.com',
+        'instagram': 'site:instagram.com',
+        'linkedin': 'site:linkedin.com',
+        'telegram': 'site:t.me',
+        'discord': 'site:discord.com',
+        'pastebin': 'site:pastebin.com',
+        'github': 'site:github.com',
+        'stackoverflow': 'site:stackoverflow.com',
+        'leaks': 'site:pastebin.com OR site:breachforums.cx', 
+        'darkweb': 'site:onion.ly OR "onion"'
+    }
+
+    if sources:
+        # Construct a combined OR query for all selected sources
+        site_filters = []
+        for s in sources:
+            if s == 'web':
+                continue # No filter for general web
+            if s in site_map:
+                site_filters.append(site_map[s])
+            else:
+                site_filters.append(f"site:{s}.com")
+        
+        valid_filters = site_filters
+        
+        if valid_filters:
+            # If 'web' was selected, we want (filters) OR (general terms) -> actually in search engine syntax, adding "OR site:..." works but usually restricts.
+            # If web is selected, we basically shouldn't restrict at all, OR we should search for "query OR (query site:twitter)" which is redundant.
+            # Strategy: If 'web' is present, don't apply ANY site filter to the main query, but maybe boost the others?
+            # actually, if 'web' is there, the user wants EVERYTHING. So `site:twitter.com` is a subset of `web`. 
+            # So if 'web' is in sources, we just run the query RAW.
+            if 'web' in sources:
+                pass # Do not append site filters
+            else:
+                if len(valid_filters) == 1:
+                    query += f" {valid_filters[0]}"
+                else:
+                    combined = " OR ".join(valid_filters)
+                    query += f" ({combined})"
+
+    results = []
+
+    # Try DDG Library first (cleanest API if works)
+    try:
+        # NOTE: Updated to 'ddgs' package if available, else try fallbacks
+        try:
+            from duckduckgo_search import DDGS
+            ddgs = DDGS()
+            if scan_type == 'images':
+                 # ... (keep image logic separate or assume text for general web)
+                 pass 
+            elif scan_type == 'text' or scan_type == 'all':
+                 ddg_gen = ddgs.text(query, max_results=5)
+                 for r in ddg_gen:
+                     results.append({
+                         "title": r.get('title', ''),
+                         "link": r.get('href', ''),
+                         "snippet": r.get('body', ''),
+                         "source": "DDGS_LIB"
+                     })
+        except Exception:
+            pass # Fallback immediately
+    except Exception:
+        pass
+
+    # If aggressive or web is selected, perform multi-engine aggregation
+    # Run scrapers
+    if not results or aggressive or 'web' in sources or not sources:
+        # We want to aggregate results from Google, Bing, and DDG HTML
+        print(f"Performing Multi-Engine Scrape for: {query}")
+        
+        # Google
+        g_results = scrape_google_html(query)
+        results.extend(g_results)
+        
+        # Bing
+        b_results = scrape_bing_html(query)
+        results.extend(b_results)
+        
+        # DDG HTML
+        d_results = scrape_ddg_html(query)
+        results.extend(d_results)
+    
+    # Dark Web search (if darkweb source selected or aggressive mode)
+    if 'darkweb' in sources or aggressive:
+        print(f"Performing Dark Web Scrape for: {query}")
+        darkweb_results = scrape_darkweb(query)
+        results.extend(darkweb_results)
+
+    # De-duplicate results by link
+    unique_results = []
+    seen_links = set()
+    for r in results:
+        if r['link'] not in seen_links:
+            unique_results.append(r)
+            seen_links.add(r['link'])
+    results = unique_results
+
+    # If still no results, maybe mock for demonstration if "aggressive"
+    if not results and aggressive:
+            # Last resort mock to show UI working
+            results.append({
+                "title": "NO_LIVE_VECTORS_FOUND",
+                "link": "#",
+                "snippet": "Target did not yield public results. Try broadening search or check network connection."
+            })
+
+    # 3. Aggressive Scraping (Fetch Page Content for Text Results)
+    if aggressive and results:
+            for item in results[:3]:
+                if item.get('link') and not item.get('full_text'):
+                    try:
+                        headers = {"User-Agent": "Mozilla/5.0"}
+                        page_resp = requests.get(item['link'], headers=headers, timeout=5)
+                        if page_resp.status_code == 200:
+                            from bs4 import BeautifulSoup
+                            page_soup = BeautifulSoup(page_resp.text, "html.parser")
+                            paragraphs = page_soup.find_all('p')
+                            text_content = ' '.join([p.get_text() for p in paragraphs[:5]])
+                            if text_content:
+                                item['full_text'] = text_content[:500] + "..." 
+                    except Exception:
+                        pass
+
+    return jsonify({
+        "status": "success",
+        "results": results,
+        "query": query,
+        "type": scan_type,
+        "aggressive": aggressive
+    })
 
 
+@app.route('/api/geosentialai/chat', methods=['POST'])
+def geosentialai_chat():
+    """
+    Advanced geospatial AI chat with Hugging Face Llama-3.1 model.
+    Integrates with real-time web results and map functions.
+    """
+    data = request.json or {}
+    user_message = data.get('message', '').strip()
+    web_search = data.get('web_search', False)
+    human_mode = data.get('human_mode', False)
+    engine = data.get('engine', 'huggingface')
+    context_data = data.get('context', {})
 
+    # Auto-enable web search for news/stocks if not already on
+    news_keywords = ["news", "stock", "price", "market", "update", "latest", "briefing", "happening"]
+    if any(k in user_message.lower() for k in news_keywords):
+        web_search = True
+    
+    if not user_message:
+        return jsonify({"error": "Empty message"}), 400
+    
+    # --- Build Web Context (DuckDuckGo Scraper) ---
+    web_context = ""
+    if web_search:
+        try:
+            query = requests.utils.quote(user_message)
+            url = f"https://html.duckduckgo.com/html/?q={query}"
+            resp = requests.post(url, data={"q": user_message}, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            if resp.status_code == 200:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(resp.text, "html.parser")
+                snippets = []
+                for result in soup.find_all("div", class_="result", limit=5):
+                    link_el = result.find("a", class_="result__a")
+                    snippet_el = result.find("a", class_="result__snippet")
+                    if link_el and snippet_el:
+                        title = link_el.get_text(strip=True)
+                        link = link_el["href"]
+                        text = snippet_el.get_text(strip=True)
+                        snippets.append(f"• [{title}]({link}): {text}")
+                if snippets:
+                    web_context = "REAL-TIME WEB DATA (DUCKDUCKGO):\n" + "\n".join(snippets)
+                else:
+                    web_context = "*(No web results found for this query)*"
+        except Exception as e:
+            web_context = f"*(Web search technical error: {e})*"
 
+    # --- Build Map Context ---
+    map_context_str = ""
+    if context_data:
+        map_context_str = "CURRENT MAP CONTEXT:\n"
+        if context_data.get('flights'):
+            map_context_str += "• FLIGHTS: " + ", ".join([f"{f['icao']} at ({f['lat']}, {f['lng']})" for f in context_data['flights']]) + "\n"
+        if context_data.get('vessels'):
+            map_context_str += "• VESSELS: " + ", ".join([f"{v['mmsi']} at ({v['lat']}, {v['lng']})" for v in context_data['vessels']]) + "\n"
+        if context_data.get('cells'):
+            map_context_str += "• CELL TOWERS: " + " | ".join(context_data['cells']) + "\n"
+        if context_data.get('networks'):
+            map_context_str += "• NETWORKS: " + " | ".join(context_data['networks']) + "\n"
+        if context_data.get('surveillance'):
+            map_context_str += "• SURVEILLANCE/SATELLITE: " + " | ".join(context_data['surveillance']) + "\n"
+        if context_data.get('sentiment'):
+            map_context_str += f"• LOCAL SENTIMENT: {context_data['sentiment']}\n"
+        map_context_str += "\n"
 
+    # --- Build System Prompt ---
+    system_prompt = (
+        "You are 'GeoSential AI', a high-tech Geospatial Intelligence (GEOINT) and OSINT assistant for HayOS. "
+        "Your mission is to provide accurate, real-time data analysis and global briefings.\n\n"
+        "CORE DIRECTIVES:\n"
+        "1. REAL-TIME ACCURACY: Prioritize 'REAL-TIME WEB DATA' for News, Stocks, and Weather updates.\n"
+        "2. MAP INTERACTION: You can trigger GUI elements by outputting tags. Use ONLY valid tags from the list below:\n"
+        "   - [TRACK_FLIGHT: <icao>] - Zooms to a specific flight.\n"
+        "   - [TRACK_VESSEL: <mmsi>] - Zooms to a specific vessel.\n"
+        "   - [SHOW_WEATHER: <lat>, <lng>] - Opens meteorology/environment GUI for coordinates.\n"
+        "   - [SCAN_MAP: <lat>, <lng>] - Zooms and initiates a sector-wide signal scan.\n"
+        "3. MULTI-LAYER ANALYSIS: Correlate SIGINT with GEOINT data if relevant.\n"
+        "4. NEWS & MARKET DATA: When asked for news or stocks, provide a concise briefing with formatted prices/headlines from the web data.\n"
+        "5. FORMATTING & UI:\n"
+        "   - Use **Bold Headers** for distinct sections.\n"
+        "   - Use blockquotes (`>`) for web search snippets and provide links.\n"
+        "   - Metrics should be in `monospaced code blocks`."
+    )
 
-# === YOUR EXACT SSL BLOCK ===
-import ssl
-if __name__ == "__main__":
+    if human_mode:
+        system_prompt += (
+            "\n\nPERSONA: 'HUMAN MODE' ACTIVE. Respond as a helpful, conversational, and empathetic human colleague. "
+            "Use natural flow, polite interjections, and expert human-level reasoning while maintaining your technical edge. "
+            "Avoid overly robotic preambles."
+        )
+    else:
+        system_prompt += "\n\nPERSONA: 'TECHNICAL OSINT MODE'. Be direct, professional, and strictly data-driven."
+
+    # --- Memory Context (ChromaDB) ---
+    memory_context = get_conversation_context(user_message)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"{web_context}\n\n{map_context_str}\n{memory_context}\nUSER_MESSAGE: {user_message}"}
+    ]
+
+    try:
+        if engine == 'ollama':
+            # Fallback to local Ollama (Phi model)
+            response = req_ollama.post(
+                f"{OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "messages": messages,
+                    "stream": False
+                },
+                timeout=120
+            )
+            response.raise_for_status()
+            reply = response.json()["message"]["content"].strip()
+        else:
+            # Default to Cloud (Hugging Face)
+            payload = {
+                "model": MODEL_ID,
+                "messages": messages,
+                "temperature": 0.7,
+                "max_tokens": 1000
+            }
+            resp = requests.post(HF_URL, headers=HEADERS, json=payload, timeout=30)
+            resp.raise_for_status()
+            reply = resp.json()["choices"][0]["message"]["content"].strip()
+
+        # Save to ChromaDB Memory (Force Save)
+        print(f"Memory: Saving interaction... User: {len(user_message)} chars, AI: {len(reply)} chars")
+        save_conversation(user_message, reply)
+
+        # Clean reply of command tags for TTS
+        clean_reply = re.sub(r'\[.*?\]', '', reply).strip()
+        
+        # gTTS Text to Speech
+        audio_base64 = ""
+        try:
+            tts = gTTS(text=clean_reply, lang='en')
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_mp3:
+                tts.save(temp_mp3.name)
+                temp_mp3_path = temp_mp3.name
+            with open(temp_mp3_path, "rb") as f:
+                audio_base64 = base64.b64encode(f.read()).decode('utf-8')
+            if os.path.exists(temp_mp3_path): os.remove(temp_mp3_path)
+        except Exception as tts_e:
+            print(f"GeoSential TTS Error: {tts_e}")
+
+        # reply = format_code_blocks(reply)
+        return jsonify({
+            "response": reply,
+            "audio": audio_base64,
+            "timestamp": datetime.now().isoformat(),
+            "web_search_used": web_search,
+            "engine_used": engine
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({"error": f"Local AI Engine (Ollama) timed out after 120s. Please ensure Ollama is running or switch to Cloud (HF) engine."}), 504
+    except Exception as e:
+        return jsonify({"error": f"AI Engine Error ({engine}): {str(e)}"}), 500
+
+@app.route('/api/geosentialai/embed', methods=['POST'])
+def geosentialai_embed():
+    """Generate embeddings for geospatial data using all-minilm model."""
+    data = request.json or {}
+    text = data.get('text', '').strip()
     
 
+
+    if not text:
+        return jsonify({"error": "Empty text"}), 400
+    
+    try:
+        response = req_ollama.post(
+            f"{OLLAMA_BASE_URL}/api/embeddings",
+            json={
+                "model": EMBEDDING_MODEL,
+                "prompt": text
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            embeddings = response.json().get('embedding', [])
+            return jsonify({"embeddings": embeddings, "dimension": len(embeddings)})
+        else:
+            return jsonify({"error": f"Embedding failed: {response.status_code}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/geosentialai/status')
+def geosentialai_status():
+    """Check if the AI subsystem is operational."""
+    # We are now using Cloud AI (Hugging Face), so we just confirm the bridge is up
+    return jsonify({
+        "status": "CONNECTED",
+        "engine": "HuggingFace Llama-3.1-8B",
+        "web_search": "DuckDuckGo_Scraper_Active"
+    })
+
+
+if __name__ == '__main__':
+
+    print("\n" + "="*60)
+    print("  H9 AI IS LIVE")
+    
+  
+    print("="*60 + "\n")
+
     app.run(host="0.0.0.0", port=8000, debug=True)
+
+
+
+
 
