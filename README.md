@@ -409,6 +409,16 @@ curl http://localhost:8000/api/geo/flights
 -   [CoinGecko](https://www.coingecko.com/)
 -   [NewsAPI](https://newsapi.org/)
 -   [tomtom](https://developer.tomtom.com)
+-   [OpenCellID](https://www.opencellid.org/)
+-   [OpenRouter](https://openrouter.ai/)
+-   [Hugging Face](https://huggingface.co/)
+-   [OpenSky Network](https://opensky-network.org/)
+-   [MyMemory](https://mymemory.translated.net/)
+-   [DuckDuckGo](https://duckduckgo.com/)
+-   [Google](https://www.google.com/)
+-   [Bing](https://www.bing.com/)
+-   [Ahmia](https://ahmia.fi/)
+-   [Twitter](https://twitter.com/)
 
 ## 🗺️ Images of GeoSentinel UI
 
