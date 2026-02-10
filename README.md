@@ -33,6 +33,13 @@ Stay updated with the latest **Geo Sentinel AI** releases and announcements.
 👉 **Subscribe here:**  
 https://docs.google.com/forms/d/e/1FAIpQLSe3qBh6r1orih2MkLf5DjdolX0jv5Abct02363lLxpXEute-Q/viewform
 
+
+🔴 **Video Tutorial**  
+Stay updated with the latest **Geo Sentinel AI** releases and announcements.
+
+👉 **Subscribe here:**  
+https://youtu.be/v4IKzEb03u0
+
 ## 📚 Documentation
 
 Detailed guides on how to use GeoSentinel's advanced features:
@@ -249,6 +256,15 @@ Below is a list of APIs used in GeoSentinel and where to obtain your API keys:
 -   🅱️ [Bing Search](https://www.bing.com/) - Web search integration.
 -   🔒 [Ahmia](https://ahmia.fi/) - Dark web search services.
 -   🦙 [Ollama](https://ollama.com/) - Local LLM processing.
+
+## GeoSentinel Search Crawler Screenshot
+
+![GeoSentinel Crawler Search Screenshot](https://raw.githubusercontent.com/h9zdev/GeoSentinel/main/images/Screenshot%20From%202026-02-09%2020-05-53.png)
+## GeoSentinel Monitor Option Screenshot
+![GeoSentinel Monitor Option Screenshot](https://raw.githubusercontent.com/h9zdev/GeoSentinel/main/images/Screenshot%20From%202026-02-09%2023-15-36.png)
+## Dark Web Search and Monitoring Screenshot
+![Dark Web Search & Monitoring Screenshot](https://raw.githubusercontent.com/h9zdev/GeoSentinel/main/images/Screenshot%20From%202026-02-10%2011-40-52.png)
+
 
 ## 🗺️ Images of GeoSentinel UI
 ![GeoSentinel Screenshot](images/Screenshot%20From%202026-01-08%2001-01-15.png)
