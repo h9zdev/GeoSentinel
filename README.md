@@ -42,6 +42,13 @@ Detailed guides on how to use GeoSentinel's advanced features:
 - 🤖 [GeoSential AI Guide](docs/geosential_ai.md) - Learn how to use the AI assistant and its commands.
 - 🔍 [Search & Dark Web Guide](docs/search_options.md) - Instructions for OSINT and dark web searching.
 
+
+> [!Note]
+> ## 🛰️ SocioSential — Social Media OSINT
+> [![GitHub](https://img.shields.io/badge/GitHub-h9zdev%2FSocioSential-blue?logo=github&style=flat-square)](https://github.com/h9zdev/SocioSential)
+> ## 📡 EthiFi — WiFi Deauther *(New Version)*
+> [![GitHub](https://img.shields.io/badge/GitHub-h9zdev%2FEthiFi-green?logo=github&style=flat-square)](https://github.com/h9zdev/EthiFi)
+
 ## 🌟 Features
 
 -   🗺️ Access to GeoJSON data and surveillance grid tiles.
