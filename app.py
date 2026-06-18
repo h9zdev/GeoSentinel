@@ -86,11 +86,16 @@ from news_config import NEWS_SOURCES
 # Flask App Initialization
 # ============================================================
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+_secret = os.environ.get('SECRET_KEY')
+if not _secret:
+    import warnings
+    warnings.warn("SECRET_KEY not set in environment; using a random key (sessions will not persist across restarts)")
+    _secret = secrets.token_hex(32)
+app.config['SECRET_KEY'] = _secret
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins=os.environ.get('CORS_ORIGINS', 'http://127.0.0.1:8080'))
 
 
 
@@ -113,7 +118,7 @@ NEWS_API_KEY      = os.environ.get("NEWS_API_KEY",      "")
 OPENROUTER_API_KEY= os.environ.get("OPENROUTER_API_KEY","")
 HIGHSIGHT_API_KEY = os.environ.get("HIGHSIGHT_API_KEY", "")
 NASA_API_KEY      = os.environ.get("NASA_API_KEY",      "")
-HF_TOKEN = ""    
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
 # Webhooks / Misc
 AIS_API_KEY         = os.environ.get("AIS_API_KEY",         "")
@@ -123,9 +128,9 @@ OLLAMA_BASE_URL  = os.environ.get("OLLAMA_BASE_URL",  "http://127.0.0.1:11434")
 OLLAMA_MODEL     = os.environ.get("OLLAMA_MODEL",     "phi:latest")
 EMBEDDING_MODEL  = os.environ.get("EMBEDDING_MODEL",  "all-minilm:latest")
 CHROMA_DB_PATH   = os.environ.get("CHROMA_DB_PATH",   "./geosent_chroma_db")
-WIGLE_API_NAME = ""
-WIGLE_API_TOKEN = ""
-api_key = ""  #SHIPS API KEYS  AISstream.io - Real-time vessel tracking (AIS).
+WIGLE_API_NAME = os.environ.get("WIGLE_API_NAME", "")
+WIGLE_API_TOKEN = os.environ.get("WIGLE_API_TOKEN", "")
+api_key = os.environ.get("AIS_API_KEY", "")  #SHIPS API KEYS  AISstream.io - Real-time vessel tracking (AIS).
 
 
 
@@ -156,11 +161,11 @@ def earth():
 @app.route('/api/geojson/<filename>')
 def get_geojson_data(filename):
     """Return a summary of the GeoJSON file (properties and first few coords to keep it snappy)."""
-    # Security check: prevent directory traversal
-    if '..' in filename or filename.startswith('/'):
+    geodata_dir = os.path.realpath(os.path.join(app.root_path, 'geodata'))
+    filepath = os.path.realpath(os.path.join(geodata_dir, filename))
+    if not filepath.startswith(geodata_dir + os.sep):
         return jsonify({"error": "Invalid filename"}), 400
 
-    filepath = os.path.join(app.root_path, 'geodata', filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "File not found"}), 404
 
@@ -1006,7 +1011,7 @@ def get_advanced_news():
         if from_date:
             params['from'] = from_date
 
-        print(f"Requesting NewsAPI: {url} with params: {params}")
+        print(f"Requesting NewsAPI: {url} with query={params.get('q','')!r} lang={params.get('language','')!r}")
         response = requests.get(url, params=params, timeout=10)
         print(f"NewsAPI Response Status: {response.status_code}")
         if response.status_code == 200:
@@ -1261,15 +1266,6 @@ def earth_networks():
         return jsonify({"error": str(e)}), 500
 
 
-# ──────────────────────────────────────────────
-#  WiGLE Token Endpoint (for frontend JS calls)
-# ──────────────────────────────────────────────
-@app.route('/api/wigle/token', methods=['GET'])
-def wigle_token():
-    """Return Base64-encoded Basic Auth header for WiGLE API."""
-    import base64
-    token = base64.b64encode(f"{WIGLE_API_NAME}:{WIGLE_API_TOKEN}".encode()).decode()
-    return jsonify({"token": token})
 
 
 # ──────────────────────────────────────────────
@@ -1857,20 +1853,27 @@ def perform_web_scan():
 
     # 3. Aggressive Scraping (Fetch Page Content for Text Results)
     if aggressive and results:
+            from urllib.parse import urlparse
             for item in results[:3]:
-                if item.get('link') and not item.get('full_text'):
-                    try:
-                        headers = {"User-Agent": "Mozilla/5.0"}
-                        page_resp = requests.get(item['link'], headers=headers, timeout=5)
-                        if page_resp.status_code == 200:
-                            from bs4 import BeautifulSoup
-                            page_soup = BeautifulSoup(page_resp.text, "html.parser")
-                            paragraphs = page_soup.find_all('p')
-                            text_content = ' '.join([p.get_text() for p in paragraphs[:5]])
-                            if text_content:
-                                item['full_text'] = text_content[:500] + "..." 
-                    except Exception:
-                        pass
+                link = item.get('link', '')
+                if not link or item.get('full_text'):
+                    continue
+                parsed = urlparse(link)
+                if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+                    continue
+                try:
+                    headers = {"User-Agent": "Mozilla/5.0"}
+                    page_resp = requests.get(link, headers=headers, timeout=5,
+                                             allow_redirects=True)
+                    if page_resp.status_code == 200:
+                        from bs4 import BeautifulSoup
+                        page_soup = BeautifulSoup(page_resp.text, "html.parser")
+                        paragraphs = page_soup.find_all('p')
+                        text_content = ' '.join([p.get_text() for p in paragraphs[:5]])
+                        if text_content:
+                            item['full_text'] = text_content[:500] + "..."
+                except Exception:
+                    pass
 
     return jsonify({
         "status": "success",
@@ -2303,12 +2306,19 @@ def search_photo_record():
     """
     if 'photo' not in request.files:
         return jsonify({"status": "error", "message": "No photo uploaded"}), 400
-    
+
     file = request.files['photo']
     if file.filename == '':
         return jsonify({"status": "error", "message": "No selected file"}), 400
 
-    image_bytes = file.read()
+    ALLOWED_MIMETYPES = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+    MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+    if file.mimetype not in ALLOWED_MIMETYPES:
+        return jsonify({"status": "error", "message": "Invalid file type. Only JPEG, PNG, GIF, WEBP allowed."}), 400
+
+    image_bytes = file.read(MAX_UPLOAD_BYTES + 1)
+    if len(image_bytes) > MAX_UPLOAD_BYTES:
+        return jsonify({"status": "error", "message": "File too large. Maximum 10 MB."}), 413
     results = []
     logs = []
 
@@ -2697,19 +2707,8 @@ DUMMY_DATA = [
     }
 ]
 
-# --- API Credentials (Wi-Fi, Bluetooth, Cells) ---
-WIGLE_API_NAME = ""
-WIGLE_API_TOKEN = ""
-OPENCELLID_API_KEY = ""
-SHODAN_API_KEY = ""
-
-@app.route('/api/wigle/token')
-def get_wigle_token():
-    # Return base64 encoded token as required by WiGLE API in some frontend calls
-    auth_str = f"{WIGLE_API_NAME}:{WIGLE_API_TOKEN}"
-    encoded = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
-    return jsonify({"token": encoded})
-
+# --- API Credentials (Wi-Fi, Bluetooth, Cells) --- loaded from env above; aliases here for clarity in wifi-search routes
+SHODAN_API_KEY = os.environ.get("SHODAN_API_KEY", "")
 
 @app.route('/map-w')
 def wifi_map():
@@ -3161,4 +3160,5 @@ def search():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host="0.0.0.0", port=int(os.environ.get('PORT', 8080)), debug=debug)
