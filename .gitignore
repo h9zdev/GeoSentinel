@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+geosent.db
+geosent_chroma_db/
+uploads/
+app_output.log
+*.log
+.vscode/
+.idea/
+venv/
+env/

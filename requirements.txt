@@ -1,4 +1,5 @@
 Flask
+Flask-SocketIO
 Werkzeug
 requests
 feedparser
@@ -9,3 +10,21 @@ ollama
 gTTS
 pysocks
 stem
+ujson
+rasterio
+ultralytics
+chromadb
+phonenumbers
+twilio
+SpeechRecognition
+pydub
+pandas
+pyotp
+qrcode
+matplotlib
+requests-oauthlib
+beautifulsoup4
+websockets
+duckduckgo-search
+sentence-transformers
+python-dotenv

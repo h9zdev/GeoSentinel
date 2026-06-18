@@ -5,13 +5,15 @@
 # --- Standard Library ---
 import os
 import io
+import random
+import base64
 import re
 import ssl
 import json
 import time
 import math
-import base64
-import random
+
+
 import string
 import secrets
 import asyncio
@@ -39,10 +41,13 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- Third-Party: HTTP & Auth ---
 import requests
-import ujson
+try:
+    import ujson as json_lib
+except ImportError:
+    import json as json_lib
 from requests.auth import HTTPBasicAuth
 from requests_oauthlib import OAuth2Session
-
+import websockets
 
 
 # --- Third-Party: Image / CV ---
@@ -57,6 +62,8 @@ from ultralytics import YOLO
 import chromadb
 from chromadb.utils import embedding_functions
 
+
+
 # --- Third-Party: Phone / Comms ---
 import phonenumbers
 from phonenumbers import timezone as phone_timezone, geocoder, carrier
@@ -69,6 +76,8 @@ from gtts import gTTS
 
 # --- Third-Party: News / Search ---
 import feedparser
+from bs4 import BeautifulSoup
+
 import pandas as pd
 import pyotp
 import qrcode
@@ -86,14 +95,44 @@ from news_config import NEWS_SOURCES
 # Flask App Initialization
 # ============================================================
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 socketio = SocketIO(app)
 
+# ============================================================
+# Database Helpers
+# ============================================================
+def get_conn():
+    """Create a database connection to the SQLite database."""
+    db_path = os.path.join(app.root_path, 'geosent.db')
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
 
+def init_db():
+    """Initialize the database with necessary tables."""
+    try:
+        conn = get_conn()
+        c = conn.cursor()
+        # Table for crime search history
+        c.execute('''CREATE TABLE IF NOT EXISTS crime_searches
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      username TEXT,
+                      search_type TEXT,
+                      query_params TEXT,
+                      results TEXT,
+                      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        conn.commit()
+        conn.close()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"Database initialization error: {e}")
 
+# Initialize database on startup
+with app.app_context():
+    init_db()
 
 # ============================================================
 # API Keys & Credentials
@@ -157,10 +196,11 @@ def earth():
 def get_geojson_data(filename):
     """Return a summary of the GeoJSON file (properties and first few coords to keep it snappy)."""
     # Security check: prevent directory traversal
-    if '..' in filename or filename.startswith('/'):
+    if '..' in filename or filename.startswith('/') or filename.startswith('.'):
         return jsonify({"error": "Invalid filename"}), 400
 
-    filepath = os.path.join(app.root_path, 'geodata', filename)
+    safe_filename = os.path.basename(filename)
+    filepath = os.path.join(app.root_path, 'geodata', safe_filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "File not found"}), 404
 
@@ -328,11 +368,6 @@ _ais_websocket_task = None
 
 def start_ais_websocket():
     """Start background WebSocket connection to AISstream.io"""
-    import asyncio
-    import websockets
-    import json
-    import threading
-    from threading import Lock
     
     global _ais_cache_lock, _ais_websocket_task
     _ais_cache_lock = Lock()
@@ -574,13 +609,12 @@ def get_crime_data():
         print(f"Error fetching crime data: {e}")
         return jsonify([])
 
-from contextlib import nullcontext
 
 @app.route('/api/geo/vessel/path/<mmsi>')
 
 def get_vessel_path(mmsi):
     """Generate a realistic historical path for a vessel."""
-    import random
+
     # Mock more historical points for a longer path
     res = []
     # Start with a random seed based on MMSI
@@ -597,7 +631,6 @@ def get_vessel_path(mmsi):
 
 
 
-from ultralytics import YOLO
 
 
 @app.route('/api/geo/news')
@@ -717,34 +750,10 @@ def get_geo_news():
         intl_news = fetch_rss_news("INTERNATIONAL")
         real_news.extend(intl_news[:15])
 
-    # --- 6. Final Mock Fallback (If all else fails) ---
-    sentiment_score = random.uniform(0.1, 0.9)
-    sentiment_label = "NEUTRAL"
-    if sentiment_score > 0.7: sentiment_label = "STABLE"
-    elif sentiment_score < 0.3: sentiment_label = "CRITICAL"
-    elif sentiment_score < 0.5: sentiment_label = "UNREST"
+    # --- 6. Degraded Mode Handling ---
+    sentiment_score = 0.5
+    sentiment_label = "UNKNOWN"
 
-    if not real_tweets:
-        hashtags = ["#Breaking", "#Alert", "#Status", "#Update", "#Intel"]
-        for _ in range(2):
-             real_tweets.append({
-                "user": f"@User_{random.randint(1000,9999)}",
-                "text": f"Activity reported in sector {random.randint(1,99)}. Status: {sentiment_label}. {random.choice(hashtags)}",
-                "timestamp": (datetime.now(timezone.utc) - timedelta(minutes=random.randint(1, 60))).strftime("%H:%M:%S")
-            })
-
-    if not real_news:
-        headlines = ["Local communications monitoring active.", "Regional security alert issued.", "Cyber-surveillance network link stable."]
-        for _ in range(3):
-            real_news.append({
-                "source": "GNN (Global News Network)",
-                "title": random.choice(headlines),
-                "time": "Just now",
-                "url": "#",
-                "published": datetime.now(timezone.utc).isoformat(),
-                "type": "MOCK_INTEL"
-            })
-        
     # --- 7. AI Intelligence Summary ---
     context_str = f"LOCATION: {location_query or 'Unknown Sector'}\n"
     if real_news:
@@ -760,11 +769,16 @@ def get_geo_news():
         "sentiment": {
             "score": round(sentiment_score, 2),
             "label": sentiment_label,
-            "trend": random.choice(["RISING", "FALLING", "STABLE"])
+            "trend": "STABLE"
         },
         "tweets": real_tweets,
         "news": real_news,
-        "intel_summary": ai_summary
+        "intel_summary": ai_summary,
+        "provenance": {
+            "twitter": "live" if real_tweets else "unavailable",
+            "news": "live" if real_news else "unavailable",
+            "ai": "cloud" if ai_summary and "ANALYSIS_OFFLINE" not in ai_summary else "offline"
+        }
     }
 
     # Store in cache
@@ -777,8 +791,7 @@ def analyze_with_ai(context):
     Use OpenRouter to analyze geopolitical context and sentiment.
     """
     if not OPENROUTER_API_KEY or "placeholder" in OPENROUTER_API_KEY:
-        # Fallback to deterministic patterns if no key
-        return f"AI_SIMULATION: Based on intercepted signals, tensions in this sector are currently {random.choice(['elevated', 'stable', 'volatile'])}. Strategic nodes show pattern {random.randint(100,999)}."
+        return "ANALYSIS_OFFLINE: Connectivity to Neural Core interrupted (Missing API Key)."
 
     try:
         response = requests.post(
@@ -823,14 +836,8 @@ def get_market_data():
         crypto_res = requests.get('https://api.coingecko.org/api/v3/simple/price?ids=bitcoin,ethereum,solana,cardano,ripple,polkadot,dogecoin,binancecoin,chainlink,matic-network&vs_currencies=usd&include_24hr_change=true', timeout=5)
         crypto_data = crypto_res.json() if crypto_res.status_code == 200 else {}
 
-        # 2. Mock Commodities (Hard to find free reliable real-time commodity API without keys)
-        # In a real app, one would use AlphaVantage or similar.
-        commodities = {
-            "OIL": {"price": 74.23 + random.uniform(-0.5, 0.5), "change": 1.2},
-            "BRENT": {"price": 79.12 + random.uniform(-0.5, 0.5), "change": -0.4},
-            "GOLD": {"price": 2035.50 + random.uniform(-5, 5), "change": 0.15},
-            "SILVER": {"price": 22.84 + random.uniform(-0.1, 0.1), "change": -0.2}
-        }
+        # 2. Commodities (Placeholder if no API key provided)
+        commodities = {}
 
         # Format crypto
         formatted_crypto = {}
@@ -846,23 +853,11 @@ def get_market_data():
         })
     except Exception as e:
         print(f"Market Data Error: {e}")
-        # Robust fallback if API fails
-        commodities = {
-            "OIL": {"price": 74.23 + random.uniform(-0.5, 0.5), "change": 0.0},
-            "BRENT": {"price": 79.12 + random.uniform(-0.5, 0.5), "change": 0.0},
-            "GOLD": {"price": 2035.50 + random.uniform(-5, 5), "change": 0.0},
-            "SILVER": {"price": 22.84 + random.uniform(-0.1, 0.1), "change": 0.0}
-        }
-        mock_crypto = {
-            "BITCOIN": {"price": 42000, "change": 0.0},
-            "ETHEREUM": {"price": 2500, "change": 0.0},
-            "SOLANA": {"price": 100, "change": 0.0}
-        }
         return jsonify({
-            "status": "OFFLINE_SIMULATION",
+            "status": "OFFLINE",
             "timestamp": datetime.now().isoformat(),
-            "commodities": commodities,
-            "crypto": mock_crypto,
+            "commodities": {},
+            "crypto": {},
             "error": str(e)
         })
 
@@ -1261,18 +1256,6 @@ def earth_networks():
         return jsonify({"error": str(e)}), 500
 
 
-# ──────────────────────────────────────────────
-#  WiGLE Token Endpoint (for frontend JS calls)
-# ──────────────────────────────────────────────
-@app.route('/api/wigle/token', methods=['GET'])
-def wigle_token():
-    """Return Base64-encoded Basic Auth header for WiGLE API."""
-    import base64
-    token = base64.b64encode(f"{WIGLE_API_NAME}:{WIGLE_API_TOKEN}".encode()).decode()
-    return jsonify({"token": token})
-
-
-# ──────────────────────────────────────────────
 #  WiGLE Surveillance Camera Scanner
 # ──────────────────────────────────────────────
 WIGLE_CAM_SSID_PATTERNS = {
@@ -1374,7 +1357,7 @@ def wigle_cameras():
         # ================================================================
 # GEOSENTIAL AI ROUTE - Ollama Phi Integration with Web Search
 # ================================================================
-import requests as req_ollama
+
 
 
 # ================================================================
@@ -1397,8 +1380,8 @@ HF_MODELS = [
 # ================================================================
 # GEOSENTIAL VECTOR DATABASE (ChromaDB)
 # ================================================================
-import chromadb
-from chromadb.utils import embedding_functions
+
+
 
 CHROMA_DB_PATH = "./geosent_chroma_db"
 COLLECTION_NAME = "geosent_memory"
@@ -1545,7 +1528,7 @@ def scrape_google_html(query):
         url = f"https://www.google.com/search?q={requests.utils.quote(query)}"
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
-            from bs4 import BeautifulSoup
+
             soup = BeautifulSoup(resp.text, "html.parser")
             # Google's HTML structure changes often, but look for standard result containers
             # Try looking for divs with class 'g' or 'tF2Cxc'
@@ -1573,7 +1556,7 @@ def scrape_bing_html(query):
         url = f"https://www.bing.com/search?q={requests.utils.quote(query)}"
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
-            from bs4 import BeautifulSoup
+
             soup = BeautifulSoup(resp.text, "html.parser")
             # Bing results are usually in <li class="b_algo">
             for li in soup.find_all('li', class_='b_algo', limit=5):
@@ -1599,7 +1582,7 @@ def scrape_ddg_html(query):
         # Use html.duckduckgo.com for easier parsing
         resp = requests.post("https://html.duckduckgo.com/html/", data={"q": query}, headers=headers, timeout=10)
         if resp.status_code == 200:
-            from bs4 import BeautifulSoup
+
             soup = BeautifulSoup(resp.text, "html.parser")
             for result in soup.find_all("div", class_="result", limit=5):
                 link_el = result.find("a", class_="result__a")
@@ -1664,7 +1647,7 @@ def scrape_darkweb(query):
             session = get_tor_session()
             response = session.get(url, headers=headers, timeout=30)
             if response.status_code == 200:
-                from bs4 import BeautifulSoup
+
                 soup = BeautifulSoup(response.text, "html.parser")
                 links = []
                 for a in soup.find_all('a'):
@@ -1708,7 +1691,7 @@ def scrape_darkweb(query):
             url = f"https://ahmia.fi/search/?q={requests.utils.quote(query)}"
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code == 200:
-                from bs4 import BeautifulSoup
+
                 soup = BeautifulSoup(resp.text, "html.parser")
                 for li in soup.find_all("li", class_="result", limit=15):  # Increased from 5 to 15
                     a = li.find("a")
@@ -1863,7 +1846,7 @@ def perform_web_scan():
                         headers = {"User-Agent": "Mozilla/5.0"}
                         page_resp = requests.get(item['link'], headers=headers, timeout=5)
                         if page_resp.status_code == 200:
-                            from bs4 import BeautifulSoup
+
                             page_soup = BeautifulSoup(page_resp.text, "html.parser")
                             paragraphs = page_soup.find_all('p')
                             text_content = ' '.join([p.get_text() for p in paragraphs[:5]])
@@ -1912,7 +1895,7 @@ def geosentialai_chat():
             url = f"https://html.duckduckgo.com/html/?q={query}"
             resp = requests.post(url, data={"q": user_message}, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             if resp.status_code == 200:
-                from bs4 import BeautifulSoup
+
                 soup = BeautifulSoup(resp.text, "html.parser")
                 snippets = []
                 for result in soup.find_all("div", class_="result", limit=5):
@@ -2020,7 +2003,7 @@ def geosentialai_chat():
     if reply is None:
         try:
             print(f"[GeoSential AI] Falling back to local Ollama ({OLLAMA_MODEL})...")
-            response = req_ollama.post(
+            response = requests.post(
                 f"{OLLAMA_BASE_URL}/api/chat",
                 json={
                     "model": OLLAMA_MODEL,
@@ -2253,26 +2236,6 @@ def search_crime_record():
             })
             seen_links.add(res['link'])
 
-    # If still no results, generate multiple simulated records
-    if not results:
-        import random as rnd
-        sim_sources = ["INTERPOL Archive", "OpenSanctions", "FBI Public Records", "UK Met Police", "Europol Intelligence", "OSINT Web Crawl", "NCA Database", "DHS Watchlist"]
-        sim_offenses = ["Suspected Financial Fraud", "Identity Theft", "Cybercrime Activity", "Money Laundering", "Document Forgery", "Wire Fraud", "Tax Evasion", "Smuggling"]
-        sim_statuses = ["Under Investigation", "Archived", "Flagged", "Person of Interest", "Unverified Lead", "Active Warrant"]
-        num_sim = rnd.randint(5, 8)
-        for i in range(num_sim):
-            src = rnd.choice(sim_sources)
-            results.append({
-                "id": f"SIM-{rnd.randint(1000, 9999)}",
-                "name": f"{query.upper()} (Record #{i+1})",
-                "dob": dob if dob else "Unknown",
-                "offense": rnd.choice(sim_offenses),
-                "status": rnd.choice(sim_statuses),
-                "source": src,
-                "details": f"Simulated intelligence record from {src}. Subject matched against global watchlists and public databases. Cross-reference ID: {rnd.randint(100000, 999999)}.",
-                "location": "https://www.google.com/search?q=" + requests.utils.quote(query + ' crime record')
-            })
-
     save_crime_search(session.get('username', 'Guest'), 'text', {
         "first_name": first_name, "last_name": last_name, "mid_name": mid_name, "dob": dob, "address": address
     }, results)
@@ -2338,7 +2301,7 @@ def search_photo_record():
                 search_resp = requests.get(search_url, headers=headers_base, timeout=15)
                 
                 if search_resp.status_code == 200:
-                    from bs4 import BeautifulSoup
+
                     soup = BeautifulSoup(search_resp.text, 'html.parser')
                     
                     # Extract similar image results
@@ -2390,7 +2353,7 @@ def search_photo_record():
     # 2. BING Visual Search
     logs.append("[SYS] QUERYING_BING_VISUAL_SEARCH...")
     try:
-        import base64
+
         img_b64 = base64.b64encode(image_bytes).decode('utf-8')
         bing_url = "https://www.bing.com/images/search?view=detailv2&iss=sbiupload&FORM=SBIIDP"
         
@@ -2404,7 +2367,7 @@ def search_photo_record():
         )
         
         if bing_resp.status_code == 200:
-            from bs4 import BeautifulSoup
+
             soup = BeautifulSoup(bing_resp.text, 'html.parser')
             
             # Extract pages containing the image
@@ -2459,7 +2422,7 @@ def search_photo_record():
         )
         
         if google_resp.status_code == 200:
-            from bs4 import BeautifulSoup
+
             soup = BeautifulSoup(google_resp.text, 'html.parser')
             
             # Extract search results
@@ -2592,12 +2555,12 @@ def search_ai_integrate():
     try:
         # Default to Cloud (Hugging Face) to ensure reliability
         payload = {
-            "model": MODEL_ID,
+            "model": HF_MODELS[0],
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 500
         }
-        resp = requests.post(HF_URL, headers=HEADERS, json=payload, timeout=30)
+        resp = requests.post(HF_CHAT_URL, headers=HF_CHAT_HEADERS, json=payload, timeout=30)
         resp.raise_for_status()
         reply = resp.json()["choices"][0]["message"]["content"].strip()
         
@@ -2624,7 +2587,7 @@ def geosentialai_embed():
         return jsonify({"error": "Empty text"}), 400
     
     try:
-        response = req_ollama.post(
+        response = requests.post(
             f"{OLLAMA_BASE_URL}/api/embeddings",
             json={
                 "model": EMBEDDING_MODEL,
@@ -2666,54 +2629,7 @@ def get_highsight_satellites():
     })
 
 # Dummy data for testing
-DUMMY_DATA = [
-    {
-        "lat": 51.505,
-        "lon": -0.09,
-        "ssid": "TestWiFi",
-        "bssid": "00:14:22:01:23:45",
-        "vendor": "Generic",
-        "signal": -65,
-        "accuracy": 50,
-        "timestamp": "2025-04-11T10:00:00Z",
-        "type": "router"
-    },
-    {
-        "lat": 51.506,
-        "lon": -0.088,
-        "cell_id": "123456789",
-        "vendor": "N/A",
-        "signal": -70,
-        "accuracy": 100,
-        "timestamp": "2025-04-11T10:01:00Z",
-        "type": "cell_tower"
-    },
-    {
-        "lat": 51.504,
-        "lon": -0.091,
-        "ip": "192.168.1.100",
-        "vendor": "CameraCorp",
-        "type": "camera"
-    }
-]
-
-# --- API Credentials (Wi-Fi, Bluetooth, Cells) ---
-WIGLE_API_NAME = ""
-WIGLE_API_TOKEN = ""
-OPENCELLID_API_KEY = ""
 SHODAN_API_KEY = ""
-
-@app.route('/api/wigle/token')
-def get_wigle_token():
-    # Return base64 encoded token as required by WiGLE API in some frontend calls
-    auth_str = f"{WIGLE_API_NAME}:{WIGLE_API_TOKEN}"
-    encoded = base64.b64encode(auth_str.encode('utf-8')).decode('utf-8')
-    return jsonify({"token": encoded})
-
-
-@app.route('/map-w')
-def wifi_map():
-    return render_template('wifi-search.html')
 
 def classify_device(name, original_type):
     if not name:
@@ -2856,22 +2772,7 @@ def nearby():
             except Exception as e:
                 print(f"Shodan exception: {str(e)}")
 
-    # Fallback to dummy data if no results
-    if not devices:
-        print(f"Using dummy data fallback for {mode}")
-        if mode == 'bluetooth':
-            devices = [
-                {"lat": lat + random.uniform(-0.002, 0.002), "lon": lon + random.uniform(-0.002, 0.002), "ssid": "Tesla Model 3", "type": "car", "vendor": "Tesla Motors"},
-                {"lat": lat + random.uniform(-0.002, 0.002), "lon": lon + random.uniform(-0.002, 0.002), "ssid": "Sony WH-1000XM4", "type": "headphone", "vendor": "Sony Corp."},
-                {"lat": lat + random.uniform(-0.002, 0.002), "lon": lon + random.uniform(-0.002, 0.002), "ssid": "Samsung QLED 75", "type": "tv", "vendor": "Samsung Electronics"},
-                {"lat": lat + random.uniform(-0.002, 0.002), "lon": lon + random.uniform(-0.002, 0.002), "ssid": "Hidden_BT_Tracker", "type": "bluetooth", "vendor": "Unknown"}
-            ]
-        else:
-            devices = [
-                {"lat": lat + random.uniform(-0.001, 0.001), "lon": lon + random.uniform(-0.001, 0.001), "ssid": "CYBER_SURVEILLANCE_ROUTER", "type": "router", "vendor": "Cisco Systems"},
-                {"lat": lat + random.uniform(-0.001, 0.001), "lon": lon + random.uniform(-0.001, 0.001), "ssid": "DASHCAM_V3", "type": "camera", "vendor": "Nextbase"},
-                {"lat": lat + random.uniform(-0.001, 0.001), "lon": lon + random.uniform(-0.001, 0.001), "ssid": "5G_TOWER_B4", "type": "cell_tower", "vendor": "Ericsson"}
-            ]
+    # No fallback to dummy data in production
 
     return jsonify({"devices": devices})
 
@@ -3148,17 +3049,10 @@ def search():
             print("Shodan search skipped: No API key provided")
 
     # Fallback to dummy data if no results
-    if not devices and search_type in ['location', 'ssid', 'bssid', 'network']:
-        devices = [d for d in DUMMY_DATA if (
-            (search_type == 'location' and abs(d['lat'] - lat) < 0.1 and abs(d['lon'] - lon) < 0.1) or
-            (search_type == 'ssid' and d.get('ssid', '').lower() == query.lower()) or
-            (search_type == 'bssid' and d.get('bssid', '').lower() == query.lower()) or
-            (search_type == 'network' and d.get('ip', '') == query)
-        )]
-        print("Using dummy data for search")
 
     return jsonify({"devices": devices})
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    debug_mode = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    app.run(host="0.0.0.0", port=8080, debug=debug_mode)
