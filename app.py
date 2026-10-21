@@ -151,6 +151,7 @@ TWITTER_BEARER_TOKEN        = os.environ.get("TWITTER_BEARER_TOKEN",        "")
 NEWS_API_KEY      = os.environ.get("NEWS_API_KEY",      "")
 OPENROUTER_API_KEY= os.environ.get("OPENROUTER_API_KEY","")
 ORCAROUTER_API_KEY= os.environ.get("ORCAROUTER_API_KEY","")
+CHEAPER_INFERENCE_API_KEY= os.environ.get("CHEAPER_INFERENCE_API_KEY","")
 HIGHSIGHT_API_KEY = os.environ.get("HIGHSIGHT_API_KEY", "")
 NASA_API_KEY      = os.environ.get("NASA_API_KEY",      "")
 HF_TOKEN = ""    
@@ -813,8 +814,8 @@ def _call_ai_gateway(api_key, endpoint, model, context):
 
 def analyze_with_ai(context):
     """
-    Use OrcaRouter (preferred when configured) or OpenRouter to analyze
-    geopolitical context and sentiment.
+    Use OrcaRouter or Cheaper Inference (preferred when configured) or
+    OpenRouter to analyze geopolitical context and sentiment.
     """
     # OrcaRouter — OpenAI-compatible gateway with gateway-level security.
     if ORCAROUTER_API_KEY and "placeholder" not in ORCAROUTER_API_KEY:
@@ -822,6 +823,18 @@ def analyze_with_ai(context):
             ORCAROUTER_API_KEY,
             "https://api.orcarouter.ai/v1/chat/completions",
             "google/gemini-3.1-flash-lite",
+            context,
+        )
+        if text:
+            return text
+        return "ANALYSIS_OFFLINE: Connectivity to Neural Core interrupted."
+
+    # Cheaper Inference — OpenAI-compatible LLM gateway.
+    if CHEAPER_INFERENCE_API_KEY and "placeholder" not in CHEAPER_INFERENCE_API_KEY:
+        text = _call_ai_gateway(
+            CHEAPER_INFERENCE_API_KEY,
+            "https://api.cheaperinference.com/v1/chat/completions",
+            "gpt-5.4-mini",
             context,
         )
         if text:
